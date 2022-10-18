@@ -19,8 +19,8 @@ async function draw(participants) {
 
         listSelected.push(result);
         console.log(`${element.name} regala a ${result.name}`);
-        //TODO: modify testmail to element.email
-        sendMail(process.env.TESTMAIL, `${process.env.SUBJECT} 2023`, `Este año tu amigo invisible es: ${result.name} No olvides los regalos :D`, `<p>Este año tu amigo invisible es:</p><h1>${result.name}</h1><br /><br /><p>No olvides los regalos :D<p>`);
+        
+        sendMail(element.email, `${process.env.SUBJECT} 2023`, `Este año tu amigo invisible es: ${result.name} No olvides los regalos :D`, `<p>Este año tu amigo invisible es:</p><h1>${result.name}</h1><br /><br /><p>No olvides los regalos :D<p>`);
     });
 }
 
