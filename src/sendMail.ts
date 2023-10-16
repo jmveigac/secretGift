@@ -16,7 +16,7 @@ export const sendMail = async (mail: Mail) => {
 
         const info = await transporter.sendMail({
             from: envUtils.FROM,
-            to: envUtils.TESTMAIL,//mail.destinyMail,
+            to: mail.destinyMail,
             subject: mail.subject,
             text: mail.messageText,
             html: mail.messageHtml
