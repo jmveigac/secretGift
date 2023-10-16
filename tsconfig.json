@@ -1,0 +1,21 @@
+{
+    "compilerOptions": {
+        "target": "ES2018",
+        "module": "CommonJS",
+        "lib": [
+            "es5",
+            "es6",
+            "es2015",
+            "DOM"
+        ],
+        "strict": true,
+        "rootDir": "src",
+        "outDir": "build",
+        "sourceMap": true,
+        "esModuleInterop": true,
+        "emitDecoratorMetadata": true,
+        "experimentalDecorators": true,
+        "resolveJsonModule": true,
+        "skipLibCheck": true
+    }
+}

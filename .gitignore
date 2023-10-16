@@ -1,3 +1,5 @@
 node_modules/
 .[Ee]nv
 google-steps/
+participants.json
+newParticipants.json
