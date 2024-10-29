@@ -21,6 +21,5 @@ async function process(participants: Participants[]) {
 
     mailList.forEach(async mail => {
         const result = await sendMail(mail);
-        // console.log('result: ', result);
     });
 }

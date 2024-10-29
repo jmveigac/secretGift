@@ -69,7 +69,7 @@ export const createMailList = (participants: Participants[]): Mail[] => {
 
 const selectGift = (selector: Participants, listToSelect: Participants[], listExclude: string[]): string => {
     const num = Math.floor(Math.random() * listToSelect.length);
-    let selected = listToSelect[num];
+    let selected = listToSelect[num > listToSelect.length ? listToSelect.length : num];
 
     if (selector.name == selected.name) return selectGift(selector, listToSelect, listExclude);
     if (selector.lastGift == selected.name) return selectGift(selector, listToSelect, listExclude);
