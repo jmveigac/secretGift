@@ -1,9 +1,12 @@
+import crypto from 'crypto';
 import Mail from './models/mail';
 import Participants from './models/participants';
-import { arrayCopy, readJson, writeJson } from './utils/commonUtils';
+import { readJson, writeJson } from './utils/commonUtils';
 import envUtils from './utils/envUtils';
 import { createHtmlMessage } from './utils/messageUtils';
 import { confirmUser, readUserData } from './utils/userInterfaceUtils';
+
+const MAX_DRAW_ATTEMPTS = 1000;
 
 export const newDrawParticipants = async (): Promise<Participants[]> => {
     let participants: Participants[] = [];
@@ -15,7 +18,6 @@ export const newDrawParticipants = async (): Promise<Participants[]> => {
     }
     else {
         const participantsNumber = parseInt(await readUserData('How many participants'));
-        let participants: Participants[] = [];
 
         for (let index = 0; index < participantsNumber; index++) {
             const participant: Participants = {
@@ -35,45 +37,57 @@ export const newDrawParticipants = async (): Promise<Participants[]> => {
 };
 
 export const createNewSecretGiftList = (participants: Participants[]): Participants[] => {
-    let newSecretList: Participants[] = [];
-    let auxList = arrayCopy(participants);
-    let listSelected: string[] = [];
+    validateParticipants(participants);
 
-    participants.forEach(participant => {
-        const result = selectGift(participant, auxList, listSelected);
-        listSelected.push(result);
-        newSecretList.push({
-            name: participant.name,
-            email: participant.email,
-            lastGift: result
-        });
-    });
+    for (let attempt = 0; attempt < MAX_DRAW_ATTEMPTS; attempt++) {
+        const shuffledReceivers = shuffleParticipants(participants);
+        const isValidDraw = participants.every((participant, index) => isValidReceiver(participant, shuffledReceivers[index]));
 
-    return newSecretList;
+        if (isValidDraw) {
+            return participants.map((participant, index) => ({
+                name: participant.name,
+                email: participant.email,
+                lastGift: shuffledReceivers[index].name,
+            }));
+        }
+    }
+
+    throw new Error('Unable to create a valid Secret Santa draw with the current restrictions');
 };
 
 export const createMailList = (participants: Participants[]): Mail[] => {
-    let listMails: Mail[] = [];
-
-    participants.forEach(participant => {
-        listMails.push({
-            destinyMail: participant.email,
-            subject: `${envUtils.SUBJECT} ${new Date().getFullYear()}`,
-            messageText: `Este año tu amigo invisible es: ${participant.lastGift} No olvides los regalos :D`,
-            messageHtml: createHtmlMessage(participant, participant.lastGift)
-        });
-    });
-
-    return listMails;
+    return participants.map(participant => ({
+        destinyMail: participant.email,
+        subject: `${envUtils.SUBJECT} ${new Date().getFullYear()}`,
+        messageText: `Este año tu amigo invisible es: ${participant.lastGift} No olvides los regalos :D`,
+        messageHtml: createHtmlMessage(participant, participant.lastGift)
+    }));
 };
 
-const selectGift = (selector: Participants, listToSelect: Participants[], listExclude: string[]): string => {
-    const num = Math.floor(Math.random() * listToSelect.length);
-    let selected = listToSelect[num > listToSelect.length ? listToSelect.length : num];
+const validateParticipants = (participants: Participants[]) => {
+    if (participants.length < 2) {
+        throw new Error('At least two participants are required');
+    }
 
-    if (selector.name == selected.name) return selectGift(selector, listToSelect, listExclude);
-    if (selector.lastGift == selected.name) return selectGift(selector, listToSelect, listExclude);
-    if (listExclude.length > 0 && listExclude.includes(selected.name)) return selectGift(selector, listToSelect, listExclude);
+    const names = participants.map(participant => participant.name.trim());
+    const uniqueNames = new Set(names);
 
-    return selected.name;
+    if (uniqueNames.size !== participants.length) {
+        throw new Error('Participant names must be unique');
+    }
+};
+
+const shuffleParticipants = (participants: Participants[]): Participants[] => {
+    const shuffled = [...participants];
+
+    for (let index = shuffled.length - 1; index > 0; index--) {
+        const randomIndex = crypto.randomInt(index + 1);
+        [shuffled[index], shuffled[randomIndex]] = [shuffled[randomIndex], shuffled[index]];
+    }
+
+    return shuffled;
+};
+
+const isValidReceiver = (selector: Participants, selected: Participants): boolean => {
+    return selector.name !== selected.name && selector.lastGift !== selected.name;
 };
