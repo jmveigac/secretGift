@@ -18,8 +18,10 @@ async function init() {
 
 async function process(participants: Participants[]) {
     const mailList = createMailList(participants);
+    const results = await Promise.allSettled(mailList.map(mail => sendMail(mail)));
+    const failedDeliveries = results.filter(result => result.status === 'rejected');
 
-    mailList.forEach(async mail => {
-        const result = await sendMail(mail);
-    });
+    if (failedDeliveries.length > 0) {
+        throw new Error(`${failedDeliveries.length} emails could not be sent`);
+    }
 }
