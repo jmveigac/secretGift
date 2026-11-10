@@ -9,6 +9,7 @@ export default function App() {
     const [editing, setEditing] = useState<Participant | null>(null);
     const [formVersion, setFormVersion] = useState(0);
     const [pending, setPending] = useState(true);
+    const [sending, setSending] = useState(false);
     const [error, setError] = useState('');
     const inFlight = useRef(false);
 
@@ -52,6 +53,20 @@ export default function App() {
             void mutate(api.draw);
         }
     }
+    function send(retryUncertain = false) {
+        if (!state?.draw.completed || !state.delivery || pending) return;
+        const warning = retryUncertain
+            ? `Se enviarán correos reales para el sorteo de ${state.draw.participantCount} participantes, incluidos los inciertos. Estos podrían haber sido aceptados por SMTP. Reenviarlos puede duplicarlos. ¿Confirmas esta decisión?`
+            : `Se enviarán correos reales para el sorteo de ${state.draw.participantCount} participantes, solo a los pendientes o fallidos. ¿Confirmas el envío?`;
+        if (window.confirm(warning)) {
+            const drawId = state.draw.completedAt;
+            void mutate(async () => {
+                setSending(true);
+                try { return await api.send(drawId, state.delivery!.revision, retryUncertain); }
+                finally { setSending(false); }
+            });
+        }
+    }
     function reset() {
         if (!pending && window.confirm('¿Reiniciar el sorteo? Se descartarán las asignaciones actuales y se conservarán los participantes.')) {
             void mutate(api.reset);
@@ -70,8 +85,8 @@ export default function App() {
             <ParticipantForm key={formVersion} participant={editing} participants={state.participants}
                 disabled={pending || locked || (!editing && state.participants.length >= state.maxParticipants)}
                 onSave={save} onCancel={clearForm} />
-            <DrawPanel state={state} pending={pending} onDraw={draw} onReset={reset} />
+            <DrawPanel state={state} pending={pending} sending={sending} onDraw={draw} onReset={reset} onSend={send} onRefresh={() => { void mutate(api.state); }} />
         </>}
-        <small>Uso local sin autenticación: cualquier persona con acceso puede consultar y modificar los datos. Se guardan sin cifrar en este equipo. No se muestran asignaciones ni se envían correos.</small>
+        <small>Uso local sin autenticación: cualquier persona con acceso puede consultar y modificar los datos. Se guardan sin cifrar en este equipo. Las asignaciones permanecen privadas. Los correos solo se envían tras confirmación.</small>
     </main>;
 }

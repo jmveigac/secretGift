@@ -155,3 +155,42 @@ describe('Fase 2 React interface', () => {
         expect(nameInput()).toHaveValue('Dani'); expect(emailInput()).toHaveValue('dani@example.invalid');
     });
 });
+
+const mailState = (overrides = {}): StateResponse => ({ ...completed, delivery: {
+    configured: true, active: false, revision: 'revision', pending: 3, accepted: 0, failed: 0, uncertain: 0, ...overrides,
+} });
+it('confirms real mail with participant count and prevents duplicate send requests', async () => {
+    const user = userEvent.setup(); await load(mailState());
+    vi.mocked(window.confirm).mockReturnValueOnce(false);
+    await user.click(button('Enviar pendientes y fallidos')); expect(fetchMock).toHaveBeenCalledTimes(1);
+    let finish!: (response: Response) => void;
+    fetchMock.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    await user.dblClick(button('Enviar pendientes y fallidos'));
+    expect(window.confirm).toHaveBeenLastCalledWith(expect.stringMatching(/correos reales.*3 participantes/));
+    expect(fetchMock).toHaveBeenCalledTimes(2); expect(button('Reiniciar sorteo')).toBeDisabled();
+    expect(screen.getByText('Envíos en curso.')).toBeInTheDocument();
+    finish(response(mailState({ pending: 0, accepted: 3 })));
+    await screen.findByText('Envíos completados: aceptados por SMTP.');
+    expect(button('Enviar pendientes y fallidos')).toBeDisabled();
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/draw/send', expect.objectContaining({ body: JSON.stringify({ confirm: true, drawId: completed.draw.completed ? completed.draw.completedAt : '', revision: 'revision', retryUncertain: false }) }));
+    expect(document.body).not.toHaveTextContent(/"assignments"|"giver"|"receiver"/);
+});
+it('requires a separate explicit decision for uncertain retries and explains SMTP acceptance', async () => {
+    const user = userEvent.setup(); await load(mailState({ pending: 0, uncertain: 1, accepted: 1, failed: 1 }));
+    expect(screen.getByText(/no confirma la llegada/)).toBeInTheDocument();
+    vi.mocked(window.confirm).mockReturnValueOnce(false);
+    await user.click(button('Reenviar también inciertos')); expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(window.confirm).toHaveBeenLastCalledWith(expect.stringMatching(/duplicarlos/));
+    fetchMock.mockResolvedValueOnce(response(mailState({pending:0, accepted:3})));
+    await user.click(button('Reenviar también inciertos'));
+    await waitFor(()=>expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(JSON.parse(fetchMock.mock.calls[1][1]!.body as string).retryUncertain).toBe(true);
+});
+it('disables sending without SMTP and while another send is active', async () => {
+    await load(mailState({ configured: false, active: true, uncertain: 1 }));
+    expect(screen.getByRole('alert')).toHaveTextContent('SMTP no está configurado');
+    expect(button('Enviar pendientes y fallidos')).toBeDisabled();
+    expect(button('Reenviar también inciertos')).toBeDisabled();
+    expect(button('Reiniciar sorteo')).toBeDisabled();
+    expect(screen.getByText('Envíos en curso.')).toBeInTheDocument();
+});

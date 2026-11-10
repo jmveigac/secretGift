@@ -4,6 +4,11 @@ services:
     ports:
       - "127.0.0.1:8787:8787"
     environment:
+      FROM: ${FROM:-}
+      HOST: ${HOST:-}
+      PORT: ${PORT:-}
+      MAILUSER: ${MAILUSER:-}
+      MAILPWD: ${MAILPWD:-}
       MAX_PARTICIPANTS: ${MAX_PARTICIPANTS:-15}
     volumes:
       - local-data:/app/data
