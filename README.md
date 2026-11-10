@@ -30,6 +30,12 @@ npm ci
 npm run dev:web
 ```
 
+Este comando compila React con Vite y arranca la web en **http://localhost:8787**.
+Para recompilar la interfaz al editarla, usa `npm run watch:frontend` en otra terminal
+y recarga el navegador. Para compilar sin arrancar, ejecuta `npm run build:web`;
+el resultado se sirve con `node build/web/server.js`.
+`npm test` ejecuta las pruebas del backend y de los componentes React.
+
 La ruta JSON se configura con `DATA_FILE` (por defecto `./data/state.json` fuera
 de Docker); `MAX_PARTICIPANTS` limita la lista (15 por defecto). Para empezar con
 otra lista, reinicia el sorteo y elimina los participantes desde la interfaz.

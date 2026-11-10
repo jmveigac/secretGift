@@ -2,11 +2,12 @@ import { promises as fs } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { randomUUID, randomInt } from 'node:crypto';
 import { drawParticipants } from '../domain/draw';
+import type { Participant, StateResponse } from './contracts';
+export type { Participant } from './contracts';
 
 export class AppError extends Error {
     constructor(public status: number, message: string) { super(message); }
 }
-export interface Participant { id: string; name: string; email: string; previousId: string | null }
 interface State { version: 1; participants: Participant[]; draw: null | { completedAt: string; assignments: { giver: string; receiver: string }[] } }
 const empty = (): State => ({ version: 1, participants: [], draw: null });
 const invalid = () => new AppError(400, 'Datos de participantes no válidos.');
@@ -77,7 +78,7 @@ export class LocalStore {
         this.queue = task.catch(() => undefined);
         return task;
     }
-    private view(state: State) {
+    private view(state: State): StateResponse {
         return { participants: state.participants.map(({ id, name, email, previousId }) => ({ id, name, email, previousId })), maxParticipants: this.max, draw: state.draw ? { completed: true, participantCount: state.participants.length, completedAt: state.draw.completedAt } : { completed: false, participantCount: state.participants.length } };
     }
     status() { return this.run(async state => this.view(state)); }

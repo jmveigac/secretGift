@@ -92,8 +92,17 @@ test('HTTP adapter accepts bodies, limits sizes and protects private routes', as
  assert.equal((await post('/api/health','{}')).status,405);
  assert.equal((await fetch(base+'/api/draw')).status,405);
  assert.equal(await (await fetch(base+'/api/state',{method:'HEAD'})).text(),'');
- assert.match(await (await fetch(base)).text(),/Participantes/);
- assert.match(await (await fetch(base+'/app.js')).text(),/confirm\(/);
+ const home=await fetch(base);const html=await home.text();
+ assert.match(html,/secretGift/);assert.match(html,/<div id="root"><\/div>/);
+ const assetPaths=[...html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map(match=>match[1]);
+ assert.equal(assetPaths.length,2);
+ for (const asset of assetPaths) {
+  const response=await fetch(base+asset);assert.equal(response.status,200);
+  assert.match(response.headers.get('content-type'),asset.endsWith('.js')?/text\/javascript/:/text\/css/);
+  assert.equal((await fetch(base+asset,{method:'HEAD'})).status,200);
+ }
+ assert.equal(home.headers.get('content-security-policy').includes('unsafe-inline'),false);
+ for (const route of ['/app.js','/src/main.tsx','/frontend/src/App.tsx','/vite.config.mts','/assets/../state.json','/assets/%2e%2e%2fstate.json','/assets/index.js.map','/assets/missing.js','/assets/.env']) assert.equal((await fetch(base+route)).status,404);
 });
 
 test('failed atomic replacement preserves committed state and releases the queue', async t => {

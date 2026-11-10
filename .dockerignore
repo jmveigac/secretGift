@@ -9,3 +9,10 @@
 !src/domain/**
 !src/models/
 !src/models/participants.ts
+!vite.config.mts
+!frontend/
+!frontend/index.html
+!frontend/tsconfig.json
+!frontend/src/
+!frontend/src/**
+frontend/src/**/*.test.tsx

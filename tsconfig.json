@@ -17,5 +17,8 @@
         "experimentalDecorators": true,
         "resolveJsonModule": true,
         "skipLibCheck": true
-    }
+    },
+    "include": [
+        "src/**/*.ts"
+    ]
 }

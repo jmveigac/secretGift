@@ -2,7 +2,8 @@ FROM node:26.13.0-bookworm-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
-COPY tsconfig.web.json ./
+COPY tsconfig.web.json vite.config.mts ./
+COPY frontend ./frontend
 COPY src/web ./src/web
 COPY src/domain ./src/domain
 COPY src/models/participants.ts ./src/models/participants.ts

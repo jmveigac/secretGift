@@ -39,3 +39,16 @@ test('matching agrees with exhaustive feasibility for every restriction at size 
   else assert.throws(() => drawParticipants(ps, () => 0), /Unable/);
  }
 });
+
+test('CLI draw and mail construction do not invoke SMTP', () => {
+ const nodemailer = require('nodemailer');
+ const { createMailList } = require('../build/drawParticipants');
+ const original = nodemailer.createTransport;
+ let calls = 0;
+ nodemailer.createTransport = () => { calls++; throw new Error('SMTP is forbidden in tests'); };
+ try {
+  const result = createNewSecretGiftList(participants);
+  assert.equal(createMailList(result).length, participants.length);
+  assert.equal(calls, 0);
+ } finally { nodemailer.createTransport = original; }
+});
