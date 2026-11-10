@@ -7,25 +7,40 @@
   "scripts": {
     "start": "ts-node --transpile-only ./src/index.ts",
     "build": "tsc",
-    "build-check": "tsc --noEmit",
-    "dev:web": "ts-node src/web/server.ts",
-    "check:web": "tsc -p tsconfig.web.json",
-    "build:web": "tsc -p tsconfig.web.json --noEmit false",
-    "test": "npm run build && node --test tests/*.test.cjs"
+    "build-check": "tsc --noEmit && tsc -p frontend/tsconfig.json",
+    "dev:web": "npm run build:web && ts-node src/web/server.ts",
+    "check:web": "tsc -p tsconfig.web.json && tsc -p frontend/tsconfig.json",
+    "build:web": "npm run build:server && npm run build:frontend",
+    "test": "npm run build && npm run build:frontend && node --test tests/*.test.cjs && npm run test:frontend",
+    "build:server": "tsc -p tsconfig.web.json --noEmit false",
+    "build:frontend": "tsc -p frontend/tsconfig.json && vite build",
+    "watch:frontend": "vite build --watch",
+    "test:frontend": "vitest run"
   },
   "keywords": [],
   "author": "jmveigac",
   "license": "ISC",
   "dependencies": {
     "dotenv": "^16.0.3",
-    "nodemailer": "^9.0.3"
+    "nodemailer": "^9.0.3",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
   },
   "devDependencies": {
-    "@types/node": "^20.8.6",
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/react": "16.3.3",
+    "@testing-library/user-event": "14.6.9",
+    "@types/node": "26.6.6",
     "@types/nodemailer": "^6.4.11",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.3.0",
+    "jsdom": "31.0.0",
     "ts-node": "^10.9.1",
     "ts-node-dev": "^2.0.0",
-    "typescript": "^5.2.2"
+    "typescript": "5.9.3",
+    "vite": "8.3.7",
+    "vitest": "5.1.0"
   },
   "engines": {
     "node": ">=26.13.0 <27"

@@ -1,64 +1,56 @@
-const page = `<!doctype html>
-<html lang="es">
-<head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>secretGift · Amigo invisible</title>
-<style>
-:root{font-family:system-ui,sans-serif;color:#253b32;background:#f6f4ed}
-body{margin:0;min-height:100vh;display:grid;place-items:center}
-main{max-width:40rem;padding:3rem 1.5rem} .tag{color:#486d5a;font-weight:600;letter-spacing:.1em}
-h1{font-size:clamp(3rem,10vw,5rem);margin:.5rem 0} p{line-height:1.7}
-.status{background:white;border:1px solid #d3ddd5;border-radius:1rem;padding:1.25rem;margin-top:2rem}
-button{font:inherit;background:#285440;color:white;border:0;border-radius:.5rem;padding:.7rem 1rem;cursor:pointer}
-button:disabled{opacity:.6}small{display:block;margin-top:2rem}
-</style>
-<script src="/status.js" defer></script>
-</head>
-<body><main>
-<p class="tag">AMIGO INVISIBLE · FASE 1</p><h1>secretGift</h1>
-<p>Las sorpresas empiezan aquí. Estamos preparando un lugar para organizar el próximo amigo invisible.</p>
-<div class="status"><p id="status" role="status" aria-live="polite">Comprobando conexión…</p>
-<button id="retry" type="button">Comprobar de nuevo</button></div>
-<small>Versión local inicial. Los sorteos y el envío de correos todavía no están disponibles en la web.</small>
-<noscript><p>Activa JavaScript para comprobar la conexión o visita <a href="/api/health">el estado del servicio</a>.</p></noscript>
-</main></body></html>`;
-
-const script = `const status = document.getElementById('status');
-const button = document.getElementById('retry');
-async function check() {
-  button.disabled = true;
-  status.textContent = 'Comprobando conexión…';
-  try {
-    const response = await fetch('/api/health', { cache: 'no-store', signal: AbortSignal.timeout(5000) });
-    const data = await response.json();
-    if (!response.ok || data.status !== 'ok') throw new Error('Unavailable');
-    status.textContent = 'Servicio operativo. Todo listo para seguir construyendo.';
-  } catch {
-    status.textContent = 'No se ha podido conectar con el servicio. Prueba de nuevo.';
-  } finally { button.disabled = false; }
-}
-button.addEventListener('click', check);
-check();`;
-
-const headers = {
+import { LocalStore, AppError } from './store';
+import { promises as fs } from 'node:fs';
+import { resolve } from 'node:path';
+export const BODY_LIMIT = 8192;
+export const headers = {
     'Cache-Control': 'no-store',
     'X-Content-Type-Options': 'nosniff',
-    'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'",
+    'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
     'Referrer-Policy': 'no-referrer'
 };
-
-export default {
-    fetch(request: Request): Response {
-        if (request.method !== 'GET' && request.method !== 'HEAD') {
-            return new Response('Method not allowed', { status: 405, headers: { ...headers, Allow: 'GET, HEAD' } });
+export const json = (value: unknown, status = 200, extra = {}) => new Response(JSON.stringify(value), { status, headers: { ...headers, 'Content-Type': 'application/json; charset=utf-8', ...extra } });
+export const createApp = (store = new LocalStore()) => ({
+    async fetch(request: Request): Promise<Response> {
+        try {
+            const url = new URL(request.url), path = url.pathname, method = request.method;
+            const asset = /^\/assets\/[A-Za-z0-9_-]+\.(js|css)$/.exec(path);
+            const participant = /^\/api\/participants\/([\da-f-]{36})$/.exec(path);
+            const methods = path === '/' || asset || path === '/api/health' || path === '/api/state' ? ['GET', 'HEAD'] : path === '/api/participants' || path === '/api/draw' || path === '/api/draw/reset' ? ['POST'] : participant ? ['PUT', 'DELETE'] : null;
+            if (!methods) return json({ error: 'Ruta no encontrada.' }, 404);
+            if (!methods.includes(method)) return json({ error: 'Método no permitido.' }, 405, { Allow: methods.join(', ') });
+            if (method === 'GET' || method === 'HEAD') {
+                let result: Response;
+                if (path === '/' || asset) {
+                    let content: string;
+                    try { content = await fs.readFile(resolve(__dirname, '../../build/public', path === '/' ? 'index.html' : path.slice(1)), 'utf8'); }
+                    catch (error) {
+                        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return json({ error: 'Ruta no encontrada.' }, 404);
+                        throw error;
+                    }
+                    const type = path === '/' ? 'text/html' : asset?.[1] === 'css' ? 'text/css' : 'text/javascript';
+                    result = new Response(content, { headers: { ...headers, 'Content-Type': `${type}; charset=utf-8` } });
+                }
+                else result = json(path === '/api/health' ? { status: 'ok' } : await store.status());
+                return method === 'HEAD' ? new Response(null, { status: result.status, headers: result.headers }) : result;
+            }
+            // Reject browser cross-origin writes, including simple form submissions.
+            if ((request.headers.has('origin') && request.headers.get('origin') !== url.origin) || request.headers.get('sec-fetch-site') === 'cross-site') return json({ error: 'Origen no permitido.' }, 403);
+            if (request.headers.get('content-type')?.split(';')[0].trim() !== 'application/json') return json({ error: 'Se requiere JSON.' }, 415);
+            const reader = request.body?.getReader();
+            const chunks: Uint8Array[] = []; let size = 0;
+            if (reader) while (true) {
+                const part = await reader.read(); if (part.done) break;
+                size += part.value.byteLength;
+                if (size > BODY_LIMIT) { await reader.cancel(); return json({ error: 'Solicitud demasiado grande.' }, 413); }
+                chunks.push(part.value);
+            }
+            let input: unknown;
+            try { input = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { return json({ error: 'JSON no válido.' }, 400); }
+            const action = path === '/api/draw' ? 'draw' : path === '/api/draw/reset' ? 'reset' : participant ? method === 'DELETE' ? 'delete' : 'edit' : 'add';
+            return json(await store.mutate(action, input, participant?.[1]), action === 'add' ? 201 : 200);
+        } catch (error) {
+            return error instanceof AppError ? json({ error: error.message }, error.status) : json({ error: 'No se pudo acceder al almacenamiento local. Comprueba sus permisos y su integridad.' }, 503);
         }
-        const path = new URL(request.url).pathname;
-        let body: string;
-        let type: string;
-        if (path === '/') { body = page; type = 'text/html; charset=utf-8'; }
-        else if (path === '/status.js') { body = script; type = 'text/javascript; charset=utf-8'; }
-        else if (path === '/api/health') { body = JSON.stringify({ status: 'ok' }); type = 'application/json'; }
-        else return new Response(request.method === 'HEAD' ? null : 'Not found', { status: 404, headers });
-        return new Response(request.method === 'HEAD' ? null : body, { headers: { ...headers, 'Content-Type': type } });
     }
-};
+});
+export default createApp();

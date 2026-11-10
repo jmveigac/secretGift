@@ -3,6 +3,10 @@ services:
     build: .
     ports:
       - "127.0.0.1:8787:8787"
+    environment:
+      MAX_PARTICIPANTS: ${MAX_PARTICIPANTS:-15}
+    volumes:
+      - local-data:/app/data
     init: true
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/api/health').then(async r => { if (!r.ok || (await r.json()).status !== 'ok') process.exit(1); }).catch(() => process.exit(1))"]
@@ -10,3 +14,6 @@ services:
       timeout: 5s
       start_period: 30s
       retries: 3
+
+volumes:
+  local-data:

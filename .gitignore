@@ -8,3 +8,4 @@ build/
 .task/
 .dev.vars*
 .env.*
+data/
