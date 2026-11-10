@@ -49,11 +49,23 @@ export class LocalStore {
         await fs.mkdir(dirname(this.path), { recursive: true, mode: 0o700 });
         await fs.chmod(dirname(this.path), 0o700);
         const temp = `${this.path}.${randomUUID()}.tmp`;
-        const file = await fs.open(temp, 'wx', 0o600);
+        const directory = await fs.open(dirname(this.path), 'r');
+        let renamed = false;
         try {
-            try { await file.writeFile(JSON.stringify(state)); await file.sync(); }
-            finally { await file.close(); }
-            await fs.rename(temp, this.path);
+            try {
+                const file = await fs.open(temp, 'wx', 0o600);
+                try { await file.writeFile(JSON.stringify(state)); await file.sync(); }
+                finally { await file.close(); }
+                await fs.rename(temp, this.path);
+                renamed = true;
+                // On Linux, fsync(file) does not persist the directory entry.
+                await directory.sync();
+            } finally { await directory.close(); }
+        } catch (error) {
+            if (renamed) {
+                throw new AppError(503, 'Los cambios ya están aplicados, pero no se pudo confirmar su durabilidad. Recarga el estado antes de reintentar.');
+            }
+            throw error;
         } finally { await fs.unlink(temp).catch(() => undefined); }
     }
     private run<T>(operation: (state: State) => Promise<T>): Promise<T> {
