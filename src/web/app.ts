@@ -54,4 +54,5 @@ export const createApp = (store = new LocalStore()) => ({
         }
     }
 });
-export default createApp();
+export const defaultStore = new LocalStore();
+export default createApp(defaultStore);

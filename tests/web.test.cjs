@@ -8,7 +8,7 @@ const { createWebServer } = require('../build/web/server');
 async function setup(t, max = 15) {
  await fs.mkdir('.task/tests', {recursive:true});
  const dir = await fs.mkdtemp(path.resolve('.task/tests/run-'));
- const file = path.join(dir,'data','state.json');
+ const file = path.join(dir,'data','state.sqlite');
  const store = new LocalStore(file, max);
  const app = createApp(store);
  const call = (route, method='GET', body, headers={}) => app.fetch(new Request('http://localhost'+route, {method, headers: {'Content-Type':'application/json', ...headers}, body: body === undefined ? undefined : JSON.stringify(body)}));
@@ -42,7 +42,7 @@ test('draw requires confirmation, persists privately, locks edits and survives a
   const data=await response.json(); assert.equal(data.draw.completed,true); assert.equal(data.draw.participantCount,2);
   assert.equal(JSON.stringify(data).includes('assignments'),false);
  }
- const disk=JSON.parse(await fs.readFile(file,'utf8')); assert.equal(disk.draw.assignments.length,2);
+ const {DatabaseSync}=require('node:sqlite');const db=new DatabaseSync(file);assert.equal(db.prepare('SELECT count(*) AS n FROM assignments').get().n,2);db.close();
  const restarted = new LocalStore(file); assert.equal((await restarted.status()).draw.completed,true);
  assert.equal((await call('/api/participants','POST',person('C'))).status,409);
  assert.equal((await call('/api/draw/reset','POST',{})).status,400);
@@ -57,10 +57,8 @@ test('serialized updates, atomic replacement and corrupt storage protection', as
  const {call,file,store} = await setup(t);
  const responses = await Promise.all(Array.from({length:10},(_,i)=>call('/api/participants','POST',person('P'+i))));
  assert.ok(responses.every(r=>r.status===201)); assert.equal((await store.status()).participants.length,10);
- const handle=await fs.open(file,'r');
  await call('/api/participants','POST',person('New'));
- assert.equal(JSON.parse(await handle.readFile('utf8')).participants.length,10); assert.equal(JSON.parse(await fs.readFile(file,'utf8')).participants.length,11); await handle.close();
- assert.deepEqual(await fs.readdir(path.dirname(file)),['state.json','state.json.lock']);
+ assert.equal((await store.status()).participants.length,11);
  for (const corrupt of ['{bad', JSON.stringify({version:1,participants:[],draw:{assignments:[]}})]) {
   await fs.writeFile(file,corrupt);
   assert.equal((await call('/api/state')).status,503);
@@ -105,18 +103,6 @@ test('HTTP adapter accepts bodies, limits sizes and protects private routes', as
  for (const route of ['/app.js','/src/main.tsx','/frontend/src/App.tsx','/vite.config.mts','/assets/../state.json','/assets/%2e%2e%2fstate.json','/assets/index.js.map','/assets/missing.js','/assets/.env']) assert.equal((await fetch(base+route)).status,404);
 });
 
-test('failed atomic replacement preserves committed state and releases the queue', async t => {
- const {store,file} = await setup(t);
- await store.mutate('add',person('A'));
- const before=await fs.readFile(file,'utf8');
- const rename=fs.rename;
- fs.rename=async()=>{throw new Error('synthetic write error');};
- try { await assert.rejects(store.mutate('add',person('B'))); } finally {fs.rename=rename;}
- assert.equal(await fs.readFile(file,'utf8'),before);
- assert.deepEqual(await fs.readdir(path.dirname(file)),['state.json','state.json.lock']);
- assert.equal((await store.mutate('add',person('B'))).participants.length,2);
-});
-
 test('direct Request API also enforces streaming body limits and impossible restrictions', async t => {
  const {app,call} = await setup(t);
  const response=await app.fetch(new Request('http://localhost/api/participants',{method:'POST',headers:{'Content-Type':'application/json'},body:'x'.repeat(9000)}));
@@ -143,56 +129,4 @@ test('HTTP rejects attacker-controlled Host even when Origin matches it', async 
  assert.equal(await request(`localhost:${port}`,`http://localhost:${port}`,'http://evil.invalid/api/participants'),400);
  assert.equal((await store.status()).participants.length,0);
  assert.equal(await request(`localhost:${port}`,`http://localhost:${port}`),201);
-});
-
-test('directory synchronization failure after rename reports the committed state honestly', async t => {
- const {store,file,call} = await setup(t);await store.mutate('add',person('A'));
- const originalOpen=fs.open;let directorySyncs=0;
- fs.open=async (...args)=>{
-  const handle=await originalOpen(...args);
-  if (args[0]===path.dirname(file) && args[1]==='r') handle.sync=async()=>{directorySyncs++;throw new Error('synthetic directory sync failure');};
-  return handle;
- };
- let response;
- try {response=await call('/api/participants','POST',person('B'));} finally {fs.open=originalOpen;}
- assert.equal(directorySyncs,1);assert.equal(response.status,503);
- assert.match((await response.json()).error,/durabilidad/);
- assert.equal((await store.status()).participants.length,2);
- assert.equal(JSON.parse(await fs.readFile(file,'utf8')).participants.length,2);
- assert.equal((await fs.stat(file)).mode&0o777,0o600);
- assert.equal((await fs.stat(path.dirname(file))).mode&0o777,0o700);
- assert.equal((await store.mutate('add',person('C'))).participants.length,3);
-});
-
-test('write and file-sync failures before rename preserve state and permissions', async t => {
- const {store,file} = await setup(t);await store.mutate('add',person('A'));
- const before=await fs.readFile(file,'utf8');
- for (const operation of ['writeFile','sync']) {
-  const originalOpen=fs.open;
-  fs.open=async (...args)=>{
-   const handle=await originalOpen(...args);
-   if (args[1]==='wx') handle[operation]=async()=>{throw new Error('synthetic pre-rename failure');};
-   return handle;
-  };
-  try {await assert.rejects(store.mutate('add',person('B')),/synthetic pre-rename failure/);} finally {fs.open=originalOpen;}
-  assert.equal(await fs.readFile(file,'utf8'),before);
-  assert.deepEqual(await fs.readdir(path.dirname(file)),['state.json','state.json.lock']);
-  assert.equal((await fs.stat(file)).mode&0o777,0o600);
-  assert.equal((await fs.stat(path.dirname(file))).mode&0o777,0o700);
- }
- assert.equal((await store.mutate('add',person('B'))).participants.length,2);
-});
-
-test('atomic write syncs the directory only after file synchronization and rename', async t => {
- const {store,file} = await setup(t);await store.mutate('add',person('A'));
- const originalOpen=fs.open, originalRename=fs.rename;const events=[];
- fs.open=async (...args)=>{
-  const handle=await originalOpen(...args),sync=handle.sync.bind(handle);
-  const kind=args[1]==='wx'?'file':args[0]===path.dirname(file)?'directory':null;
-  if (kind) handle.sync=async()=>{events.push(kind);return sync();};
-  return handle;
- };
- fs.rename=async (...args)=>{events.push('rename');return originalRename(...args);};
- try {await store.mutate('add',person('B'));} finally {fs.open=originalOpen;fs.rename=originalRename;}
- assert.deepEqual(events,['file','rename','directory']);
 });

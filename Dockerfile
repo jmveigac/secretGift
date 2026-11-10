@@ -14,8 +14,9 @@ WORKDIR /app
 COPY --from=build --chown=node:node /app/build ./build
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund && command -v flock
-RUN mkdir /app/data && chown node:node /app/data && chmod 700 /app/data
-ENV DATA_FILE=/app/data/state.json
+RUN mkdir /app/data /app/keys && chown node:node /app/data /app/keys && chmod 700 /app/data /app/keys
+ENV DATA_FILE=/app/data/state.sqlite
+ENV DATA_KEY_FILE=/app/keys/storage.key
 ENV WEB_HOST=0.0.0.0
 USER node
 EXPOSE 8787
