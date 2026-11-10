@@ -21,7 +21,7 @@ El acceso está limitado a localhost. Para detener el entorno, pulsa Ctrl+C y ej
 docker compose down
 ```
 
-Para trabajar fuera de Docker, instala Node.js >=22.12.0 y npm:
+Para trabajar fuera de Docker, instala Node.js 26 LTS (>=26.13.0 <27) y npm:
 
 ```bash
 npm ci

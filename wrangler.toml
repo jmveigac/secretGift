@@ -1,8 +1,0 @@
-name = "secretgift-local"
-main = "src/web/worker.ts"
-compatibility_date = "2026-11-10"
-send_metrics = false
-
-[dev]
-ip = "127.0.0.1"
-port = 8787

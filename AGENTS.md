@@ -13,7 +13,9 @@
 
 - Separar la lógica del sorteo de la interfaz, persistencia y transporte de correo.
 - Conservar la compatibilidad de la CLI mientras siga soportada.
-- Considerar el objetivo futuro de Cloudflare Workers/D1 sin infraestructura prematura.
+- Usar la portabilidad y la neutralidad respecto al proveedor de alojamiento como criterios arquitectónicos.
+- Mantener el código público separado de la configuración privada de producción.
+- El entorno local debe arrancar sin cuentas, tokens ni dependencias de servicios externos.
 - No imponer tecnologías ajenas a la arquitectura existente sin justificación.
 
 ## Seguridad y privacidad
@@ -22,6 +24,7 @@
 - No registrar secretos ni información personal innecesaria.
 - Usar datos sintéticos y no enviar correos reales en pruebas.
 - No publicar ni desplegar servicios sin autorización explícita.
+- No incorporar ni documentar decisiones privadas de infraestructura, dominios o identificadores propios.
 - No asumir que Base64 proporciona confidencialidad.
 
 ## Documentación
