@@ -1,54 +1,72 @@
 # secretGift
 
-## Prerequisites
-If you want to run, you need the next __.env__ configuration:
+Aplicación de amigo invisible con una base web local y una CLI heredada
+para generar asignaciones y enviar correos.
 
-```js
-FROM='"Name From" <mail@mail.es>'
-HOST='smtp.host.com'
-PORT='000'
-MAILUSER='mail@mail.es'
-MAILPWD='password'
-SUBJECT='Subject'
-TESTMAIL='testmail@mail.com'
+## Web local
+
+Requisitos: Ubuntu WSL2, Docker Engine y Docker Compose v2 o posterior.
+La web solo muestra la portada y el estado de la conexión; no permite realizar sorteos.
+
+Desde la raíz del repositorio:
+
+```bash
+docker compose up --build
 ```
-If you want to read from json you need to create __participants.json__ with the following data:
 
-```json
+Abre **http://localhost:8787**. La página comprueba la conexión con el backend.
+El acceso está limitado a localhost. Para detener el entorno, pulsa Ctrl+C y ejecuta:
+
+```bash
+docker compose down
+```
+
+Para trabajar fuera de Docker, instala Node.js 26 LTS (>=26.13.0 <27) y npm:
+
+```bash
+npm ci
+npm run dev:web
+```
+
+## CLI heredada
+
+Usa la misma instalación de Node.js y dependencias indicada arriba.
+Crea un archivo `.env` en la raíz con tu configuración SMTP. Este ejemplo
+contiene valores ficticios: sustituye los campos antes de usar la CLI.
+
+```dotenv
+FROM='"Organizador" <organizador@example.invalid>'
+HOST='smtp.example.invalid'
+PORT='587'
+MAILUSER=''
+MAILPWD=''
+SUBJECT='Amigo invisible'
+TESTMAIL='prueba@example.invalid'
+```
+
+Para un nuevo sorteo, puedes introducir los participantes por consola o cargar
+`participants.json` desde la raíz. Debe contener un array JSON codificado en
+Base64, no JSON plano. Ejemplo sintético listo para codificar en Ubuntu:
+
+```bash
+base64 -w 0 > participants.json <<'JSON'
 [
-    {
-        "name": "name1",
-        "email": "name1@mail.com",
-        "lastGift": "name3"
-    },
-    {
-        "name": "name2",
-        "email": "name2@mail.com",
-        "lastGift": "name1"
-    },
-    {
-        "name": "name3",
-        "email": "name3@mail.com",
-        "lastGift": "name2"
-    },
-    ...
+  {"name":"A","email":"a@example.invalid","lastGift":""},
+  {"name":"B","email":"b@example.invalid","lastGift":""},
+  {"name":"C","email":"c@example.invalid","lastGift":""}
 ]
+JSON
 ```
 
-And later encode in base64:
-```
-WwogICAgewogICAgICAgICJuYW1lIjogIm5hbWUxIiwKICAgICAgICAiZW1haWwiOiAibmFtZTFAbWFpbC5jb20iLAogICAgICAgICJsYXN0R2lmdCI6ICJuYW1lMyIKICAgIH0sCiAgICB7CiAgICAgICAgIm5hbWUiOiAibmFtZTIiLAogICAgICAgICJlbWFpbCI6ICJuYW1lMkBtYWlsLmNvbSIsCiAgICAgICAgImxhc3RHaWZ0IjogIm5hbWUxIgogICAgfSwKICAgIHsKICAgICAgICAibmFtZSI6ICJuYW1lMyIsCiAgICAgICAgImVtYWlsIjogIm5hbWUzQG1haWwuY29tIiwKICAgICAgICAibGFzdEdpZnQiOiAibmFtZTIiCiAgICB9Cl0=
-```
+`lastGift` es el nombre de quien recibió el regalo el año anterior; usa `""`
+si no existe. Los nombres deben ser únicos.
 
-To remind a draw, you need a json in base64 called newParticipants.json
+La CLI puede enviar correos reales.
 
-## To run the code
 ```bash
-$ npm i
-$ npm start
+npm start
 ```
 
-## To check the code
-```bash
-$ npm run build-check
-```
+Elige `1` para generar un sorteo y enviarlo por correo. La CLI guarda el resultado
+en `newParticipants.json`, también en Base64. Para reenviar, elige `2` y conserva
+ese archivo en la raíz; contiene las asignaciones privadas que se volverán a enviar.
