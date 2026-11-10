@@ -3,18 +3,22 @@ import { dirname, resolve } from 'node:path';
 import { randomUUID, randomInt } from 'node:crypto';
 import { drawParticipants } from '../domain/draw';
 import type { Participant, StateResponse } from './contracts';
+import { smtpSender, type MailSender } from './mail';
+import { storageLock } from './lock';
 export type { Participant } from './contracts';
 
 export class AppError extends Error {
     constructor(public status: number, message: string) { super(message); }
 }
-interface State { version: 1; participants: Participant[]; draw: null | { completedAt: string; assignments: { giver: string; receiver: string }[] } }
+type Delivery = 'pending' | 'uncertain' | 'accepted' | 'failed';
+const activePaths = new Set<string>();
+interface State { version: 1; participants: Participant[]; draw: null | { completedAt: string; assignments: { giver: string; receiver: string }[]; deliveryRevision?: string; deliveries?: Record<string, Delivery> } }
 const empty = (): State => ({ version: 1, participants: [], draw: null });
 const invalid = () => new AppError(400, 'Datos de participantes no válidos.');
 export class LocalStore {
     private queue: Promise<unknown> = Promise.resolve();
     readonly path: string;
-    constructor(path = process.env.DATA_FILE ?? './data/state.json', readonly max = Number(process.env.MAX_PARTICIPANTS ?? 15)) {
+    constructor(path = process.env.DATA_FILE ?? './data/state.json', readonly max = Number(process.env.MAX_PARTICIPANTS ?? 15), private readonly mail: MailSender = smtpSender()) {
         this.path = resolve(path);
         if (!Number.isInteger(max) || max < 2 || max > 100) throw new Error('Invalid participant limit');
     }
@@ -29,6 +33,8 @@ export class LocalStore {
         if (state.draw !== null) {
             const d = state.draw;
             if (!d || typeof d.completedAt !== 'string' || !Number.isFinite(Date.parse(d.completedAt)) || !Array.isArray(d.assignments) || d.assignments.length !== ids.size || ids.size < 2) throw invalid();
+            if (d.deliveryRevision !== undefined && (typeof d.deliveryRevision !== 'string' || !/^[\da-f-]{36}$/.test(d.deliveryRevision))) throw invalid();
+            if (d.deliveries !== undefined && (!d.deliveries || typeof d.deliveries !== 'object' || Array.isArray(d.deliveries) || Object.keys(d.deliveries).length !== ids.size || Object.entries(d.deliveries).some(([id, status]) => !ids.has(id) || !['pending', 'uncertain', 'accepted', 'failed'].includes(status)))) throw invalid();
             const g = new Set(), r = new Set();
             for (const a of d.assignments) {
                 if (!a || !ids.has(a.giver) || !ids.has(a.receiver) || a.giver === a.receiver || state.participants.find(p => p.id === a.giver)?.previousId === a.receiver || g.has(a.giver) || r.has(a.receiver)) throw invalid();
@@ -47,6 +53,7 @@ export class LocalStore {
         return state;
     }
     private async write(state: State) {
+        this.validate(state);
         await fs.mkdir(dirname(this.path), { recursive: true, mode: 0o700 });
         await fs.chmod(dirname(this.path), 0o700);
         const temp = `${this.path}.${randomUUID()}.tmp`;
@@ -69,19 +76,63 @@ export class LocalStore {
             throw error;
         } finally { await fs.unlink(temp).catch(() => undefined); }
     }
-    private run<T>(operation: (state: State) => Promise<T>): Promise<T> {
+    private run<T>(operation: (state: State) => Promise<T>, lock = false): Promise<T> {
         const task = this.queue.then(async () => {
-            let state: State;
-            try { state = await this.read(); } catch { throw new Error('Storage unavailable'); }
-            return operation(state);
+            let release: (() => Promise<void>) | undefined;
+            if (lock) {
+                if (activePaths.has(this.path)) throw new AppError(409, 'Hay un envío en curso. Espera antes de modificar el sorteo.');
+                try { release = await storageLock(this.path); } catch { throw new AppError(409, 'El almacenamiento está ocupado por otra operación.'); }
+            }
+            try {
+                let state: State;
+                try { state = await this.read(); } catch { throw new Error('Storage unavailable'); }
+                return await operation(state);
+            } finally { await release?.(); }
         });
         this.queue = task.catch(() => undefined);
         return task;
     }
     private view(state: State): StateResponse {
-        return { participants: state.participants.map(({ id, name, email, previousId }) => ({ id, name, email, previousId })), maxParticipants: this.max, draw: state.draw ? { completed: true, participantCount: state.participants.length, completedAt: state.draw.completedAt } : { completed: false, participantCount: state.participants.length } };
+        const counts = { pending: 0, uncertain: 0, accepted: 0, failed: 0 };
+        if (state.draw) for (const p of state.participants) counts[state.draw.deliveries?.[p.id] ?? 'pending']++;
+        return { delivery: { revision: state.draw?.deliveryRevision ?? state.draw?.completedAt ?? '', configured: this.mail.configured, active: activePaths.has(this.path), ...counts }, participants: state.participants.map(({ id, name, email, previousId }) => ({ id, name, email, previousId })), maxParticipants: this.max, draw: state.draw ? { completed: true, participantCount: state.participants.length, completedAt: state.draw.completedAt } : { completed: false, participantCount: state.participants.length } };
     }
     status() { return this.run(async state => this.view(state)); }
+    async send(input: unknown) {
+        if (!input || typeof input !== 'object' || (input as { confirm?: unknown }).confirm !== true) throw new AppError(400, 'Confirma el envío de correos reales.');
+        const body = input as { drawId?: unknown; revision?: unknown; retryUncertain?: unknown };
+        if (activePaths.has(this.path)) throw new AppError(409, 'Hay un envío en curso.');
+        let release: () => Promise<void>;
+        try { release = await storageLock(this.path); } catch { throw new AppError(409, 'Hay otra operación en curso.'); }
+        activePaths.add(this.path);
+        try {
+            const state = await this.read();
+            const draw = state.draw;
+            if (!draw) throw new AppError(409, 'Confirma el sorteo antes de enviar.');
+            if (body.drawId !== draw.completedAt) throw new AppError(409, 'El sorteo ha cambiado. Recarga antes de enviar.');
+            if (!this.mail.configured) throw new AppError(409, 'SMTP no está configurado. Configura las variables privadas y reinicia la aplicación.');
+            if (body.revision !== (draw.deliveryRevision ?? draw.completedAt)) throw new AppError(409, 'El estado de envío ha cambiado. Recarga antes de reintentar.');
+            draw.deliveryRevision = randomUUID();
+            draw.deliveries ??= Object.fromEntries(state.participants.map(p => [p.id, 'pending' as Delivery]));
+            await this.write(state);
+            for (const assignment of draw.assignments) {
+                const previous = draw.deliveries[assignment.giver];
+                if (previous === 'accepted' || previous === 'uncertain' && body.retryUncertain !== true) continue;
+                // Persist before SMTP. Any interruption leaves an explicit uncertain result.
+                draw.deliveries[assignment.giver] = 'uncertain';
+                await this.write(state);
+                const giver = state.participants.find(p => p.id === assignment.giver)!;
+                const receiver = state.participants.find(p => p.id === assignment.receiver)!;
+                let outcome: Delivery = 'uncertain';
+                try { outcome = await this.mail.send({ to: giver.email, name: giver.name, receiver: receiver.name }); } catch { /* never expose SMTP errors */ }
+                draw.deliveries[assignment.giver] = outcome;
+                await this.write(state);
+            }
+            const result = this.view(state);
+            result.delivery!.active = false;
+            return result;
+        } finally { activePaths.delete(this.path); await release(); }
+    }
     mutate(action: 'add' | 'edit' | 'delete' | 'draw' | 'reset', input: unknown, id?: string) {
         return this.run(async state => {
             if (!input || typeof input !== 'object' || Array.isArray(input)) throw invalid();
@@ -96,7 +147,7 @@ export class LocalStore {
                     const source = state.participants.map(p => ({ name: p.id, email: p.email, lastGift: p.previousId ?? '' }));
                     let result;
                     try { result = drawParticipants(source, randomInt); } catch { throw new AppError(422, 'No existe un sorteo válido con estos participantes y restricciones.'); }
-                    state.draw = { completedAt: new Date().toISOString(), assignments: result.map(p => ({ giver: p.name, receiver: p.lastGift })) };
+                    state.draw = { completedAt: new Date().toISOString(), deliveryRevision: randomUUID(), assignments: result.map(p => ({ giver: p.name, receiver: p.lastGift })) };
                 } else {
                     const index = state.participants.findIndex(p => p.id === id);
                     if (action !== 'add' && index < 0) throw new AppError(404, 'Participante no encontrado.');
@@ -113,6 +164,6 @@ export class LocalStore {
             this.validate(state);
             await this.write(state);
             return this.view(state);
-        });
+        }, true);
     }
 }

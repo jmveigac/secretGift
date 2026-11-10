@@ -60,7 +60,7 @@ test('serialized updates, atomic replacement and corrupt storage protection', as
  const handle=await fs.open(file,'r');
  await call('/api/participants','POST',person('New'));
  assert.equal(JSON.parse(await handle.readFile('utf8')).participants.length,10); assert.equal(JSON.parse(await fs.readFile(file,'utf8')).participants.length,11); await handle.close();
- assert.deepEqual(await fs.readdir(path.dirname(file)),['state.json']);
+ assert.deepEqual(await fs.readdir(path.dirname(file)),['state.json','state.json.lock']);
  for (const corrupt of ['{bad', JSON.stringify({version:1,participants:[],draw:{assignments:[]}})]) {
   await fs.writeFile(file,corrupt);
   assert.equal((await call('/api/state')).status,503);
@@ -113,7 +113,7 @@ test('failed atomic replacement preserves committed state and releases the queue
  fs.rename=async()=>{throw new Error('synthetic write error');};
  try { await assert.rejects(store.mutate('add',person('B'))); } finally {fs.rename=rename;}
  assert.equal(await fs.readFile(file,'utf8'),before);
- assert.deepEqual(await fs.readdir(path.dirname(file)),['state.json']);
+ assert.deepEqual(await fs.readdir(path.dirname(file)),['state.json','state.json.lock']);
  assert.equal((await store.mutate('add',person('B'))).participants.length,2);
 });
 
@@ -176,7 +176,7 @@ test('write and file-sync failures before rename preserve state and permissions'
   };
   try {await assert.rejects(store.mutate('add',person('B')),/synthetic pre-rename failure/);} finally {fs.open=originalOpen;}
   assert.equal(await fs.readFile(file,'utf8'),before);
-  assert.deepEqual(await fs.readdir(path.dirname(file)),['state.json']);
+  assert.deepEqual(await fs.readdir(path.dirname(file)),['state.json','state.json.lock']);
   assert.equal((await fs.stat(file)).mode&0o777,0o600);
   assert.equal((await fs.stat(path.dirname(file))).mode&0o777,0o700);
  }

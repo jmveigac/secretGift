@@ -19,5 +19,6 @@ export const api = {
         request(`/api/participants${id ? `/${id}` : ''}`, id ? 'PUT' : 'POST', participant),
     remove: (id: string) => request(`/api/participants/${id}`, 'DELETE', {}),
     draw: () => request('/api/draw', 'POST', { confirm: true }),
+    send: (drawId: string, revision: string, retryUncertain = false) => request('/api/draw/send', 'POST', { confirm: true, drawId, revision, retryUncertain }),
     reset: () => request('/api/draw/reset', 'POST', { confirm: true }),
 };

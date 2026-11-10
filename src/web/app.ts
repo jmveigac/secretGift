@@ -15,7 +15,7 @@ export const createApp = (store = new LocalStore()) => ({
             const url = new URL(request.url), path = url.pathname, method = request.method;
             const asset = /^\/assets\/[A-Za-z0-9_-]+\.(js|css)$/.exec(path);
             const participant = /^\/api\/participants\/([\da-f-]{36})$/.exec(path);
-            const methods = path === '/' || asset || path === '/api/health' || path === '/api/state' ? ['GET', 'HEAD'] : path === '/api/participants' || path === '/api/draw' || path === '/api/draw/reset' ? ['POST'] : participant ? ['PUT', 'DELETE'] : null;
+            const methods = path === '/' || asset || path === '/api/health' || path === '/api/state' ? ['GET', 'HEAD'] : path === '/api/participants' || path === '/api/draw' || path === '/api/draw/reset' || path === '/api/draw/send' ? ['POST'] : participant ? ['PUT', 'DELETE'] : null;
             if (!methods) return json({ error: 'Ruta no encontrada.' }, 404);
             if (!methods.includes(method)) return json({ error: 'Método no permitido.' }, 405, { Allow: methods.join(', ') });
             if (method === 'GET' || method === 'HEAD') {
@@ -46,6 +46,7 @@ export const createApp = (store = new LocalStore()) => ({
             }
             let input: unknown;
             try { input = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { return json({ error: 'JSON no válido.' }, 400); }
+            if (path === '/api/draw/send') return json(await store.send(input));
             const action = path === '/api/draw' ? 'draw' : path === '/api/draw/reset' ? 'reset' : participant ? method === 'DELETE' ? 'delete' : 'edit' : 'add';
             return json(await store.mutate(action, input, participant?.[1]), action === 'add' ? 201 : 200);
         } catch (error) {
