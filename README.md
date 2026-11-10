@@ -6,7 +6,9 @@ para generar asignaciones y enviar correos.
 ## Web local
 
 Requisitos: Ubuntu WSL2, Docker Engine y Docker Compose v2 o posterior.
-La web solo muestra la portada y el estado de la conexión; no permite realizar sorteos.
+Añade o edita participantes y selecciona opcionalmente su destinatario anterior.
+Confirma el sorteo para generar las asignaciones sin mostrarlas ni enviar correos.
+Para cambiar la lista tras sortear, confirma «Reiniciar sorteo»; conserva los participantes.
 
 Desde la raíz del repositorio:
 
@@ -14,7 +16,7 @@ Desde la raíz del repositorio:
 docker compose up --build
 ```
 
-Abre **http://localhost:8787**. La página comprueba la conexión con el backend.
+Abre **http://localhost:8787**. Los datos se conservan en un volumen local incluso después de detener Docker.
 El acceso está limitado a localhost. Para detener el entorno, pulsa Ctrl+C y ejecuta:
 
 ```bash
@@ -27,6 +29,14 @@ Para trabajar fuera de Docker, instala Node.js 26 LTS (>=26.13.0 <27) y npm:
 npm ci
 npm run dev:web
 ```
+
+La ruta JSON se configura con `DATA_FILE` (por defecto `./data/state.json` fuera
+de Docker); `MAX_PARTICIPANTS` limita la lista (15 por defecto). Para empezar con
+otra lista, reinicia el sorteo y elimina los participantes desde la interfaz.
+
+Uso local sin autenticación: no existe aislamiento entre personas con acceso.
+El archivo contiene correos y asignaciones sin cifrar, con permisos restrictivos;
+protege el equipo y sus copias. Base64 tampoco proporciona confidencialidad.
 
 ## CLI heredada
 

@@ -5,3 +5,7 @@
 !src/
 !src/web/
 !src/web/**
+!src/domain/
+!src/domain/**
+!src/models/
+!src/models/participants.ts
