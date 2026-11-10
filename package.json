@@ -7,7 +7,11 @@
   "scripts": {
     "start": "ts-node --transpile-only ./src/index.ts",
     "build": "tsc",
-    "build-check": "tsc --noEmit"
+    "build-check": "tsc --noEmit",
+    "dev:web": "CLOUDFLARE_CF_FETCH_ENABLED=false WRANGLER_SEND_METRICS=false WRANGLER_LOG_PATH=.task/wrangler.log XDG_CONFIG_HOME=.task/config wrangler dev --local --ip 127.0.0.1 --port 8787",
+    "check:web": "tsc -p tsconfig.web.json",
+    "build:web": "CLOUDFLARE_CF_FETCH_ENABLED=false WRANGLER_SEND_METRICS=false WRANGLER_LOG_PATH=.task/wrangler.log XDG_CONFIG_HOME=.task/config wrangler deploy --dry-run --outdir .task/worker-build",
+    "test": "npm run build && node --test tests/*.test.cjs"
   },
   "keywords": [],
   "author": "jmveigac",
@@ -21,6 +25,7 @@
     "@types/nodemailer": "^6.4.11",
     "ts-node": "^10.9.1",
     "ts-node-dev": "^2.0.0",
-    "typescript": "^5.2.2"
+    "typescript": "^5.2.2",
+    "wrangler": "4.159.0"
   }
 }

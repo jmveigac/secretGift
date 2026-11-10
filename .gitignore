@@ -3,3 +3,8 @@ node_modules/
 google-steps/
 participants.json
 newParticipants.json
+build/
+.wrangler/
+.task/
+.dev.vars*
+.env.*
