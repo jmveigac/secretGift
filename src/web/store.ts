@@ -1,10 +1,10 @@
-import { promises as fs } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname, resolve, join } from 'node:path';
 import { randomUUID, randomInt } from 'node:crypto';
 import { drawParticipants } from '../domain/draw';
 import type { Participant, StateResponse } from './contracts';
 import { smtpSender, type MailSender } from './mail';
 import { storageLock } from './lock';
+import { EncryptedDatabase, MissingDatabaseError } from './database';
 export type { Participant } from './contracts';
 
 export class AppError extends Error {
@@ -12,16 +12,17 @@ export class AppError extends Error {
 }
 type Delivery = 'pending' | 'uncertain' | 'accepted' | 'failed';
 const activePaths = new Set<string>();
-interface State { version: 1; participants: Participant[]; draw: null | { completedAt: string; assignments: { giver: string; receiver: string }[]; deliveryRevision?: string; deliveries?: Record<string, Delivery> } }
-const empty = (): State => ({ version: 1, participants: [], draw: null });
+export interface State { version: 1; participants: Participant[]; draw: null | { completedAt: string; assignments: { giver: string; receiver: string }[]; deliveryRevision?: string; deliveries?: Record<string, Delivery> } }
 const invalid = () => new AppError(400, 'Datos de participantes no válidos.');
 export class LocalStore {
     private queue: Promise<unknown> = Promise.resolve();
     readonly path: string;
-    constructor(path = process.env.DATA_FILE ?? './data/state.json', readonly max = Number(process.env.MAX_PARTICIPANTS ?? 15), private readonly mail: MailSender = smtpSender()) {
-        this.path = resolve(path);
+    constructor(path = process.env.DATA_FILE ?? './data/state.sqlite', readonly max = Number(process.env.MAX_PARTICIPANTS ?? 15), private readonly mail: MailSender = smtpSender(), private readonly keyPath = process.env.DATA_KEY_FILE ?? join(dirname(resolve(path)), '../keys/storage.key')) {
+        this.path = resolve(path.endsWith('.json') ? path.slice(0, -5) + '.sqlite' : path);
+        this.legacyPath = resolve(path.endsWith('.json') ? path : join(dirname(path), 'state.json'));
         if (!Number.isInteger(max) || max < 2 || max > 100) throw new Error('Invalid participant limit');
     }
+    private readonly legacyPath: string;
     private validate(state: State) {
         if (!state || state.version !== 1 || !Array.isArray(state.participants) || state.participants.length > this.max) throw invalid();
         const ids = new Set<string>(), names = new Set<string>(), emails = new Set<string>();
@@ -42,39 +43,16 @@ export class LocalStore {
             }
         }
     }
+    private async database<T>(operation: (db: EncryptedDatabase) => T): Promise<T> {
+        const db = await EncryptedDatabase.open(this.path, this.keyPath, this.legacyPath, state => this.validate(state));
+        try { return operation(db); } finally { db.close(); }
+    }
     private async read(): Promise<State> {
-        let raw: string;
-        try { raw = await fs.readFile(this.path, 'utf8'); }
-        catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return empty(); throw error; }
-        const state = JSON.parse(raw) as State;
-        this.validate(state);
-        await fs.chmod(dirname(this.path), 0o700);
-        await fs.chmod(this.path, 0o600);
-        return state;
+        return this.database(db => { const state = db.read(); this.validate(state); return state; });
     }
     private async write(state: State) {
         this.validate(state);
-        await fs.mkdir(dirname(this.path), { recursive: true, mode: 0o700 });
-        await fs.chmod(dirname(this.path), 0o700);
-        const temp = `${this.path}.${randomUUID()}.tmp`;
-        const directory = await fs.open(dirname(this.path), 'r');
-        let renamed = false;
-        try {
-            try {
-                const file = await fs.open(temp, 'wx', 0o600);
-                try { await file.writeFile(JSON.stringify(state)); await file.sync(); }
-                finally { await file.close(); }
-                await fs.rename(temp, this.path);
-                renamed = true;
-                // On Linux, fsync(file) does not persist the directory entry.
-                await directory.sync();
-            } finally { await directory.close(); }
-        } catch (error) {
-            if (renamed) {
-                throw new AppError(503, 'Los cambios ya están aplicados, pero no se pudo confirmar su durabilidad. Recarga el estado antes de reintentar.');
-            }
-            throw error;
-        } finally { await fs.unlink(temp).catch(() => undefined); }
+        await this.database(db => db.write(state));
     }
     private run<T>(operation: (state: State) => Promise<T>, lock = false): Promise<T> {
         const task = this.queue.then(async () => {
@@ -85,7 +63,10 @@ export class LocalStore {
             }
             try {
                 let state: State;
-                try { state = await this.read(); } catch { throw new Error('Storage unavailable'); }
+                try { state = await this.read(); } catch (error) {
+                    if (error instanceof MissingDatabaseError) throw error;
+                    throw new Error('Storage unavailable');
+                }
                 return await operation(state);
             } finally { await release?.(); }
         });

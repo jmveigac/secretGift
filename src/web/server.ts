@@ -1,5 +1,6 @@
 import { createServer } from 'node:http';
-import app, { BODY_LIMIT, json } from './app';
+import app, { BODY_LIMIT, json, defaultStore } from './app';
+import { MissingDatabaseError } from './database';
 
 export const createWebServer = (application = app) => createServer(async (request, response) => {
     try {
@@ -51,7 +52,14 @@ export const createWebServer = (application = app) => createServer(async (reques
 if (require.main === module) {
     const host = process.env.WEB_HOST ?? '127.0.0.1';
     const server = createWebServer();
-    server.listen(8787, host, () => console.log(`secretGift: http://${host}:8787`));
+    defaultStore.status().then(() => {
+        server.listen(8787, host, () => console.log(`secretGift: http://${host}:8787`));
+    }).catch((error) => {
+        console.error(error instanceof MissingDatabaseError
+            ? 'Falta la base SQLite, pero existe la clave: restaura la base con su clave original. No se ha creado una base vacía.'
+            : 'No se pudo abrir el almacenamiento: comprueba la integridad, los permisos y la clave original.');
+        process.exitCode = 1;
+    });
     const stop = () => server.close();
     process.once('SIGTERM', stop); process.once('SIGINT', stop);
 }

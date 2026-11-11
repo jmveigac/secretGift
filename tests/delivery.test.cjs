@@ -5,11 +5,14 @@ const path = require('node:path');
 const { LocalStore } = require('../build/web/store');
 const { createApp } = require('../build/web/app');
 const { smtpSender } = require('../build/web/mail');
+const { EncryptedDatabase } = require('../build/web/database');
+async function diskState(file) { const db=await EncryptedDatabase.open(file,path.join(path.dirname(file),'../keys/storage.key'),path.join(path.dirname(file),'state.json'),()=>{});try{return db.read();}finally{db.close();} }
+async function writeState(file,state) { const db=await EncryptedDatabase.open(file,path.join(path.dirname(file),'../keys/storage.key'),path.join(path.dirname(file),'state.json'),()=>{});try{db.write(state);}finally{db.close();} }
 const { storageLock } = require('../build/web/lock');
 async function setup(mail = { configured: true, send: async () => 'accepted' }) {
  await fs.mkdir('.task/tests', {recursive:true});
  const dir = await fs.mkdtemp(path.resolve('.task/tests/mail-'));
- const file = path.join(dir,'state.json');
+ const file = path.join(dir,'data','state.sqlite');
  const store = new LocalStore(file,15,mail);
  const app=createApp(store);
  const call=(body, headers={})=>app.fetch(new Request('http://localhost/api/draw/send',{method:'POST',headers:{'Content-Type':'application/json',...headers},body:JSON.stringify(body)}));
@@ -32,17 +35,17 @@ test('requires confirmed draw, explicit confirmation, current revision and priva
 test('uses persisted assignments, partial failure retries skip accepted and duplicate HTTP requests cannot retry failures',async()=>{
  const sent=[];let fail=true;
  const {store,file,call,confirm,payload}=await setup({configured:true,send:async m=>{sent.push(m);return m.name==='Bea'&&fail?'failed':'accepted';}});
- await confirm(); const before=JSON.parse(await fs.readFile(file,'utf8')); const request=await payload();
+ await confirm(); const before=await diskState(file); const request=await payload();
  let response=await call(request);assert.equal(response.status,200);
  let state=await response.json();assert.equal(state.delivery.accepted,2);assert.equal(state.delivery.failed,1);
  for(const message of sent){const giver=before.participants.find(p=>p.email===message.to);const a=before.draw.assignments.find(a=>a.giver===giver.id);assert.equal(message.name,giver.name);assert.equal(message.receiver,before.participants.find(p=>p.id===a.receiver).name);}
  assert.doesNotMatch(JSON.stringify(state),/assignments|receiver|giver|MAILPWD/);
  assert.equal((await call(request)).status,409);assert.equal(sent.length,3);
  fail=false;response=await call(await payload());assert.equal(response.status,200);assert.equal((await response.json()).delivery.accepted,3);assert.equal(sent.length,4);assert.equal(sent[3].name,'Bea');
- assert.deepEqual(JSON.parse(await fs.readFile(file,'utf8')).draw.assignments,before.draw.assignments);
+ assert.deepEqual((await diskState(file)).draw.assignments,before.draw.assignments);
  const restarted=new LocalStore(file,15,{configured:true,send:async()=>assert.fail('accepted must not resend')});
  const publicState=await restarted.status();await restarted.send({confirm:true,drawId:publicState.draw.completedAt,revision:publicState.delivery.revision});
- await store.mutate('reset',{confirm:true}); assert.equal((await store.status()).delivery.accepted,0);assert.equal(JSON.parse(await fs.readFile(file,'utf8')).draw,null);
+ await store.mutate('reset',{confirm:true}); assert.equal((await store.status()).delivery.accepted,0);assert.equal((await diskState(file)).draw,null);
  await confirm();assert.equal((await store.status()).delivery.pending,3);
 });
 test('concurrent send and reset are blocked while progress remains readable',async()=>{
@@ -57,20 +60,20 @@ test('concurrent send and reset are blocked while progress remains readable',asy
  resume();assert.equal((await first).status,200);assert.equal(calls,3);
 });
 test('phase 2 JSON migrates lazily; restart retains uncertain results until explicit retry',async()=>{
- const {file,confirm}=await setup();await confirm();const disk=JSON.parse(await fs.readFile(file,'utf8'));
- assert.equal(disk.draw.deliveries,undefined);delete disk.draw.deliveryRevision;await fs.writeFile(file,JSON.stringify(disk));
+ const {file,confirm}=await setup();await confirm();const disk=await diskState(file);
+ assert.equal(Object.values(disk.draw.deliveries).every(s=>s==='pending'),true);delete disk.draw.deliveryRevision;await writeState(file,disk);
  let calls=0;const restart=()=>new LocalStore(file,15,{configured:true,send:async()=>{calls++;return 'accepted';}});
  let store=restart();assert.equal((await store.status()).delivery.pending,3);
  disk.draw.deliveries=Object.fromEntries(disk.participants.map((p,i)=>[p.id,i===0?'uncertain':i===1?'accepted':'failed']));
- await fs.writeFile(file,JSON.stringify(disk));store=restart();
+ await writeState(file,disk);store=restart();
  let state=await store.status();await store.send({confirm:true,drawId:state.draw.completedAt,revision:state.delivery.revision});assert.equal(calls,1);
  store=restart();state=await store.status();assert.equal(state.delivery.uncertain,1);assert.equal(state.delivery.accepted,2);
  await store.send({confirm:true,drawId:state.draw.completedAt,revision:state.delivery.revision,retryUncertain:true});assert.equal(calls,2);
 });
 test('SMTP outcome is never persisted as accepted before confirmation; storage failure leaves uncertain on disk',async()=>{
- const {file,store,confirm,payload}=await setup({configured:true,send:async()=>{const disk=JSON.parse(await fs.readFile(file,'utf8'));assert.ok(Object.values(disk.draw.deliveries).includes('uncertain'));throw new Error('sensitive SMTP error');}});
+ const {file,store,confirm,payload}=await setup({configured:true,send:async()=>{const disk=await diskState(file);assert.ok(Object.values(disk.draw.deliveries).includes('uncertain'));throw new Error('sensitive SMTP error');}});
  await confirm();await store.send(await payload());assert.equal((await store.status()).delivery.uncertain,3);
- const bad=JSON.parse(await fs.readFile(file,'utf8'));bad.draw.deliveries[bad.participants[0].id]='delivered';await fs.writeFile(file,JSON.stringify(bad));await assert.rejects(store.status());
+ const bad=await diskState(file);bad.draw.deliveries[bad.participants[0].id]='delivered';await assert.rejects(writeState(file,bad));
 });
 test('process termination leaves uncertain mail persistent and releases the OS lock',async()=>{
  const {file,confirm,payload}=await setup();await confirm();const request=await payload();
@@ -89,10 +92,10 @@ test('process termination leaves uncertain mail persistent and releases the OS l
  assert.equal(sent,2);assert.equal((await restarted.status()).delivery.uncertain,1);
 });
 test('failed persistence after SMTP acceptance keeps an uncertain result after restart',async()=>{
- const rename=fs.rename;
- const {file,confirm,store,payload}=await setup({configured:true,send:async()=>{fs.rename=async()=>{throw new Error('disk failure');};return 'accepted';}});
+ const originalWrite=EncryptedDatabase.prototype.write;
+ const {file,confirm,store,payload}=await setup({configured:true,send:async()=>{EncryptedDatabase.prototype.write=function(){throw new Error('disk failure');};return 'accepted';}});
  await confirm();const request=await payload();
- try{await assert.rejects(store.send(request),/disk failure/);}finally{fs.rename=rename;}
+ try{await assert.rejects(store.send(request),/disk failure/);}finally{EncryptedDatabase.prototype.write=originalWrite;}
  const restarted=new LocalStore(file,15,{configured:true,send:async()=>assert.fail('uncertain must not resend')});
  const state=await restarted.status();assert.equal(state.delivery.uncertain,1);assert.equal(state.delivery.accepted,0);
 });
