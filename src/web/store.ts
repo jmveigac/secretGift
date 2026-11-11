@@ -1,6 +1,7 @@
 import { dirname, resolve, join } from 'node:path';
 import { randomUUID, randomInt } from 'node:crypto';
 import { drawParticipants } from '../domain/draw';
+import { validateState, type State, type Delivery } from '../domain/editions';
 import type { Participant, StateResponse } from './contracts';
 import { smtpSender, type MailSender } from './mail';
 import { storageLock } from './lock';
@@ -10,9 +11,8 @@ export type { Participant } from './contracts';
 export class AppError extends Error {
     constructor(public status: number, message: string) { super(message); }
 }
-type Delivery = 'pending' | 'uncertain' | 'accepted' | 'failed';
 const activePaths = new Set<string>();
-export interface State { version: 1; participants: Participant[]; draw: null | { completedAt: string; assignments: { giver: string; receiver: string }[]; deliveryRevision?: string; deliveries?: Record<string, Delivery> } }
+export type { State } from '../domain/editions';
 const invalid = () => new AppError(400, 'Datos de participantes no válidos.');
 export class LocalStore {
     private queue: Promise<unknown> = Promise.resolve();
@@ -24,24 +24,7 @@ export class LocalStore {
     }
     private readonly legacyPath: string;
     private validate(state: State) {
-        if (!state || state.version !== 1 || !Array.isArray(state.participants) || state.participants.length > this.max) throw invalid();
-        const ids = new Set<string>(), names = new Set<string>(), emails = new Set<string>();
-        for (const p of state.participants) {
-            if (!p || typeof p.id !== 'string' || !/^[\da-f-]{36}$/.test(p.id) || ids.has(p.id) || typeof p.name !== 'string' || !p.name || p.name !== p.name.trim().replace(/\s+/g, ' ') || p.name.length > 100 || /[\x00-\x1f\x7f]/.test(p.name) || typeof p.email !== 'string' || p.email.length > 254 || /[\x00-\x1f\x7f]/.test(p.email) || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p.email) || names.has(p.name.toLowerCase()) || emails.has(p.email.toLowerCase())) throw invalid();
-            ids.add(p.id); names.add(p.name.toLowerCase()); emails.add(p.email.toLowerCase());
-        }
-        for (const p of state.participants) if (p.previousId !== null && (!ids.has(p.previousId) || p.previousId === p.id)) throw invalid();
-        if (state.draw !== null) {
-            const d = state.draw;
-            if (!d || typeof d.completedAt !== 'string' || !Number.isFinite(Date.parse(d.completedAt)) || !Array.isArray(d.assignments) || d.assignments.length !== ids.size || ids.size < 2) throw invalid();
-            if (d.deliveryRevision !== undefined && (typeof d.deliveryRevision !== 'string' || !/^[\da-f-]{36}$/.test(d.deliveryRevision))) throw invalid();
-            if (d.deliveries !== undefined && (!d.deliveries || typeof d.deliveries !== 'object' || Array.isArray(d.deliveries) || Object.keys(d.deliveries).length !== ids.size || Object.entries(d.deliveries).some(([id, status]) => !ids.has(id) || !['pending', 'uncertain', 'accepted', 'failed'].includes(status)))) throw invalid();
-            const g = new Set(), r = new Set();
-            for (const a of d.assignments) {
-                if (!a || !ids.has(a.giver) || !ids.has(a.receiver) || a.giver === a.receiver || state.participants.find(p => p.id === a.giver)?.previousId === a.receiver || g.has(a.giver) || r.has(a.receiver)) throw invalid();
-                g.add(a.giver); r.add(a.receiver);
-            }
-        }
+        try { validateState(state, this.max); } catch { throw invalid(); }
     }
     private async database<T>(operation: (db: EncryptedDatabase) => T): Promise<T> {
         const db = await EncryptedDatabase.open(this.path, this.keyPath, this.legacyPath, state => this.validate(state));
