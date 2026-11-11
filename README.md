@@ -35,6 +35,14 @@ Ambos sobreviven a `docker compose down`, reinicios y recreaciones. **No uses
 `npm run dev:web` usa `data/state.sqlite` y `keys/storage.key`; puedes elegir
 rutas con `DATA_FILE` y `DATA_KEY_FILE`, en directorios separados.
 
+SQLite ahora conserva grupos independientes y ediciones con sus propias copias
+de participantes, asignaciones y estados de envío. La actualización migra
+automáticamente el sorteo existente a un grupo y una edición iniciales, con la
+misma clave y sin enviar correos. Haz una copia antes de actualizar; si la
+migración se interrumpe, vuelve a arrancar con la base y su clave originales.
+La web sigue trabajando sobre el grupo inicial. La gestión visual de varios
+grupos y ediciones llegará en una fase posterior.
+
 Al actualizar una instalación anterior, conserva su volumen `local-data`.
 Si todavía no hay SQLite, la web valida y migra automáticamente `state.json`
 del mismo directorio, sin sortear ni enviar correos. Conserva participantes,
@@ -111,7 +119,8 @@ Tras sortear, pulsa «Enviar pendientes y fallidos» y confirma: **se enviarán
 correos reales**. «Actualizar estado» permite consultar el progreso. Los aceptados
 por SMTP no se reenvían; esta aceptación no garantiza la recepción en la bandeja
 de entrada. Los inciertos requieren confirmación adicional porque podrían
-haberse enviado ya. Reiniciar el sorteo descarta sus asignaciones y estados de envío.
+haberse enviado ya. Reiniciar el sorteo abre una edición de trabajo sin sorteo;
+la edición anterior conserva sus participantes, asignaciones y estados en SQLite.
 
 Antes de usarlo con familiares, prueba con tres participantes ficticios y buzones
 que controles: confirma el envío, revisa que cada correo contenga solo su propia

@@ -1,10 +1,6 @@
 /** Public API contracts: current draw assignments must never be included here. */
-export interface Participant {
-    id: string;
-    name: string;
-    email: string;
-    previousId: string | null;
-}
+import type { Participant } from '../domain/editions';
+export type { Participant } from '../domain/editions';
 export type ParticipantInput = Omit<Participant, 'id'>;
 export interface StateResponse {
     delivery?: {
