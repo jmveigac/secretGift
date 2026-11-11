@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { promises as fs } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
-import { randomBytes, randomUUID, createCipheriv, createDecipheriv } from 'node:crypto';
+import { randomBytes, randomUUID, createCipheriv, createDecipheriv, createHmac } from 'node:crypto';
 import { storageLock } from './lock';
 import { validateState, type State, type Group, type Person, type Edition } from '../domain/editions';
 import { isDeepStrictEqual } from 'node:util';
@@ -176,6 +176,16 @@ export class EncryptedDatabase {
         return { id, name };
     }
     createGroup(name: string): Group { return this.transaction(() => this.insertGroup(name)); }
+    renameGroup(groupId: string, name: string) {
+        this.transaction(() => {
+            this.requireGroup(groupId); this.validateName(name);
+            this.db.prepare('UPDATE groups SET private=? WHERE id=?').run(this.seal(name, `group:${groupId}`), groupId);
+        });
+    }
+    // Keyed revisions avoid exposing a guessable digest of private assignments.
+    fingerprint(context: string, value: unknown): string {
+        return createHmac('sha256', this.key).update('secretGift:revision:1:').update(context).update('\0').update(JSON.stringify(value)).digest('hex');
+    }
     listGroups(): Group[] {
         return this.db.prepare('SELECT * FROM groups ORDER BY rowid').all().map(row => {
             const id = row.id as string, name = this.unseal(row.private, `group:${id}`);
@@ -323,11 +333,30 @@ export class EncryptedDatabase {
         if (before.draw && (!after.draw || !isDeepStrictEqual(before.participants, after.participants)
             || before.draw.completedAt !== after.draw.completedAt || !isDeepStrictEqual(before.draw.assignments, after.draw.assignments))) throw new Error('Drawn editions retain their participants and assignments');
     }
-    writeEdition(groupId: string, editionId: string, state: State) {
+    writeEdition(groupId: string, editionId: string, state: State, newPerson?: Person) {
         this.transaction(() => {
             const before = this.readState(groupId, editionId);
             this.checkDrawUnchanged(before, state);
+            if (newPerson) {
+                if (this.listPeople(groupId).some(p => p.id === newPerson.id)) throw new Error('Person already exists');
+                this.savePerson(groupId, newPerson);
+            }
             this.replace(groupId, editionId, state);
+        });
+    }
+    forkEdition(groupId: string, editionId: string): Edition {
+        return this.transaction(() => {
+            const state = this.readState(groupId, editionId);
+            if (!state.draw) throw new Error('Edition has no draw');
+            const editions = this.listEditions(groupId), source = editions.find(e => e.id === editionId)!;
+            let n = 1, name: string;
+            do { name = `${source.name.slice(0, 70)} (continuación ${n++})`; }
+            while (editions.some(e => e.year === source.year && e.name.toLowerCase() === name.toLowerCase()));
+            const next = this.insertEdition(groupId, name, source.year);
+            this.replace(groupId, next.id, { ...state, draw: null });
+            const current = this.current();
+            if (current.groupId === groupId && current.editionId === editionId) this.db.prepare('UPDATE compatibility SET edition_id=? WHERE id=1').run(next.id);
+            return next;
         });
     }
     // Legacy UI always targets the initial group and its current working edition.

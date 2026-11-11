@@ -11,10 +11,22 @@ Necesitas Docker Engine y Docker Compose v2 o posterior. Desde la raíz del repo
 docker compose up --build
 ```
 
-Abre **http://localhost:8787**. Añade o edita participantes e indica opcionalmente
-su destinatario anterior. Confirma el sorteo: no muestra asignaciones ni envía
-correos. Para modificar la lista después, confirma «Reiniciar sorteo»; conserva
-los participantes. Para empezar con otra lista, elimínalos desde la interfaz.
+Abre **http://localhost:8787**. Crea un grupo con nombre y selecciónalo en
+«Grupo activo». En «Personas del grupo» añade o edita contactos; puedes activar
+o desactivar personas sin borrar su identidad ni su historial. Los cambios del
+directorio no modifican los contactos guardados en ediciones anteriores.
+
+Crea una edición con nombre y año, marcando las personas activas que participarán.
+Puedes crear varias del mismo año con nombres distintos. «Edición activa» permite
+abrirlas después: distingue las pendientes de las sorteadas. El encabezado indica
+siempre el grupo y la edición actuales. Cambiar de selección no envía correos.
+
+Antes de sortear puedes incluir personas activas del grupo, añadir participantes
+nuevos, editar sus datos para esa edición e indicar un destinatario anterior.
+Retirar a alguien de esa lista no lo desactiva en el directorio. Confirma el
+sorteo: no muestra asignaciones ni envía correos. Después se bloquea la lista;
+para preparar otro sorteo, crea otra edición o confirma «Reiniciar sorteo».
+Las ediciones sorteadas conservan sus datos y muestran fecha y contadores de envío.
 
 El acceso está limitado a localhost. Los datos se conservan en un volumen local
 al detener la aplicación. Para detenerla, pulsa Ctrl+C y ejecuta:
@@ -40,8 +52,7 @@ de participantes, asignaciones y estados de envío. La actualización migra
 automáticamente el sorteo existente a un grupo y una edición iniciales, con la
 misma clave y sin enviar correos. Haz una copia antes de actualizar; si la
 migración se interrumpe, vuelve a arrancar con la base y su clave originales.
-La web sigue trabajando sobre el grupo inicial. La gestión visual de varios
-grupos y ediciones llegará en una fase posterior.
+El grupo y la edición migrados aparecen en los selectores de la web.
 
 Al actualizar una instalación anterior, conserva su volumen `local-data`.
 Si todavía no hay SQLite, la web valida y migra automáticamente `state.json`
@@ -116,11 +127,14 @@ Recrea la aplicación con `docker compose up --build`. Sin SMTP configurado
 puedes preparar y confirmar el sorteo, pero no enviar correos.
 
 Tras sortear, pulsa «Enviar pendientes y fallidos» y confirma: **se enviarán
-correos reales**. «Actualizar estado» permite consultar el progreso. Los aceptados
+correos reales solo para la edición seleccionada**. Cada edición tiene sus propios
+contadores y estados. «Actualizar estado» permite consultar el progreso. Los aceptados
 por SMTP no se reenvían; esta aceptación no garantiza la recepción en la bandeja
 de entrada. Los inciertos requieren confirmación adicional porque podrían
 haberse enviado ya. Reiniciar el sorteo abre una edición de trabajo sin sorteo;
 la edición anterior conserva sus participantes, asignaciones y estados en SQLite.
+Mientras hay un envío activo se bloquean las escrituras. Si otra pestaña cambia
+los datos, actualiza el grupo o el estado de la edición antes de volver a intentarlo.
 
 Antes de usarlo con familiares, prueba con tres participantes ficticios y buzones
 que controles: confirma el envío, revisa que cada correo contenga solo su propia

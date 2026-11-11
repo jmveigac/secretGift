@@ -18,6 +18,7 @@ export default function DrawPanel({ state, pending, sending, onDraw, onReset, on
             ? `Sorteo completado · ${state.draw.participantCount} participantes. Las asignaciones permanecen privadas.`
             : 'Pendiente. Nadie se regalará a sí mismo ni repetirá el destinatario anterior. La viabilidad se comprobará al realizar el sorteo.'}</p>
         <button disabled={busy || state.draw.completed || state.participants.length < 2} onClick={onDraw}>Realizar sorteo</button>
+        {state.draw.completed && <p>Fecha del sorteo: {new Date(state.draw.completedAt).toLocaleString('es-ES')}</p>}
         <button className="secondary" disabled={busy || !state.draw.completed} onClick={onReset}>Reiniciar sorteo</button>
         {state.draw.completed && delivery && <div>
             <h3>Envío de asignaciones</h3>
@@ -30,7 +31,7 @@ export default function DrawPanel({ state, pending, sending, onDraw, onReset, on
                 <p>Un envío incierto puede haber sido aceptado. Reenviarlo puede producir un duplicado.</p>
                 <button disabled={busy || !delivery.configured} onClick={() => onSend(true)}>Reenviar también inciertos</button>
             </>}
-            <button className="secondary" disabled={pending} onClick={onRefresh}>Actualizar estado</button>
         </div>}
+        <button className="secondary" disabled={pending} onClick={onRefresh}>Actualizar estado</button>
     </section>;
 }

@@ -24,4 +24,6 @@ li { display: flex; justify-content: space-between; flex-wrap: wrap; gap: .75rem
 .form-actions { margin-top: 1rem; }
 small { display: block; line-height: 1.6; }
 fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.person-choice { display: flex; align-items: center; gap: .6rem; overflow-wrap: anywhere; }
+.person-choice input { width: auto; flex-shrink: 0; }
 @media (max-width: 32rem) { main { padding: 1rem; } section { padding: 1rem; } li { flex-direction: column; } }
