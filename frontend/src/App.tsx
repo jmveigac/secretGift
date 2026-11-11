@@ -77,6 +77,8 @@ export default function App() {
         <p className="tag">AMIGO INVISIBLE · LOCAL</p>
         <h1>secretGift</h1>
         <p>Prepara la lista y deja que empiece la sorpresa.</p>
+        <p><a href="/mail-preview" target="_blank" rel="noopener noreferrer">Vista previa del correo</a> (se abre en otra pestaña).
+            {' '}Solo datos ficticios; no envía correos ni utiliza tu sorteo.</p>
         <p role="status" aria-live="polite">{pending ? state ? 'Guardando cambios…' : 'Cargando datos…' : ''}</p>
         {error && <p role="alert">{error}</p>}
         {state && <>
@@ -87,6 +89,6 @@ export default function App() {
                 onSave={save} onCancel={clearForm} />
             <DrawPanel state={state} pending={pending} sending={sending} onDraw={draw} onReset={reset} onSend={send} onRefresh={() => { void mutate(api.state); }} />
         </>}
-        <small>Uso local sin autenticación: cualquier persona con acceso puede consultar y modificar los datos. Se guardan sin cifrar en este equipo. Las asignaciones permanecen privadas. Los correos solo se envían tras confirmación.</small>
+        <small>Uso local sin autenticación: quien tenga acceso a la aplicación puede gestionar los datos. Los campos personales y las asignaciones privadas se guardan cifrados; SQLite no está cifrado íntegramente. Los correos solo se envían tras confirmación.</small>
     </main>;
 }

@@ -1,5 +1,6 @@
 import nodemailer = require('nodemailer');
 import 'dotenv/config';
+import { assignmentContent } from './mail-template';
 
 export interface AssignmentMessage { to: string; name: string; receiver: string }
 export interface MailSender { configured: boolean; send(message: AssignmentMessage): Promise<'accepted' | 'failed' | 'uncertain'> }
@@ -22,7 +23,7 @@ export function smtpSender(env = process.env): MailSender {
             try {
                 const result = await transport.sendMail({
                     from: env.FROM, to: message.to, subject: 'Amigo invisible',
-                    text: `Hola ${message.name}:\n\nEn el sorteo de amigo invisible te ha tocado regalar a ${message.receiver}.\nMantén tu asignación en secreto. ¡Disfruta preparando el regalo!`,
+                    ...assignmentContent(message.name, message.receiver),
                 });
                 return result.accepted?.length === 1 ? 'accepted' : 'failed';
             } catch (error) {

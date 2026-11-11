@@ -88,6 +88,10 @@ Un administrador con acceso al proceso y a la clave puede recuperar los datos.
 
 ## Correo desde la web
 
+Los correos incluyen HTML y una alternativa completa en texto plano. Pulsa
+«Vista previa del correo» en la web para abrir un ejemplo en otra pestaña:
+solo utiliza datos ficticios, no consulta tu sorteo ni envía correos. No necesita SMTP.
+
 Crea un archivo privado `.env` en la raíz (no lo compartas ni lo añadas a Git):
 
 ```dotenv
