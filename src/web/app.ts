@@ -1,6 +1,7 @@
 import { LocalStore, AppError } from './store';
 import { promises as fs } from 'node:fs';
 import { resolve } from 'node:path';
+import { assignmentContent } from './mail-template';
 export const BODY_LIMIT = 8192;
 export const headers = {
     'Cache-Control': 'no-store',
@@ -15,12 +16,19 @@ export const createApp = (store = new LocalStore()) => ({
             const url = new URL(request.url), path = url.pathname, method = request.method;
             const asset = /^\/assets\/[A-Za-z0-9_-]+\.(js|css)$/.exec(path);
             const participant = /^\/api\/participants\/([\da-f-]{36})$/.exec(path);
-            const methods = path === '/' || asset || path === '/api/health' || path === '/api/state' ? ['GET', 'HEAD'] : path === '/api/participants' || path === '/api/draw' || path === '/api/draw/reset' || path === '/api/draw/send' ? ['POST'] : participant ? ['PUT', 'DELETE'] : null;
+            const methods = path === '/' || asset || path === '/mail-preview' || path === '/api/health' || path === '/api/state' ? ['GET', 'HEAD'] : path === '/api/participants' || path === '/api/draw' || path === '/api/draw/reset' || path === '/api/draw/send' ? ['POST'] : participant ? ['PUT', 'DELETE'] : null;
             if (!methods) return json({ error: 'Ruta no encontrada.' }, 404);
             if (!methods.includes(method)) return json({ error: 'Método no permitido.' }, 405, { Allow: methods.join(', ') });
             if (method === 'GET' || method === 'HEAD') {
                 let result: Response;
-                if (path === '/' || asset) {
+                if (path === '/mail-preview') {
+                    // Fixed synthetic data only: never read the store or invoke SMTP.
+                    result = new Response(assignmentContent('Lucía (ejemplo ficticio)', 'Mateo (ejemplo ficticio)').html, { headers: {
+                        ...headers, 'Content-Type': 'text/html; charset=utf-8',
+                        'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'; sandbox"
+                    } });
+                }
+                else if (path === '/' || asset) {
                     let content: string;
                     try { content = await fs.readFile(resolve(__dirname, '../../build/public', path === '/' ? 'index.html' : path.slice(1)), 'utf8'); }
                     catch (error) {

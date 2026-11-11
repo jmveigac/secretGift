@@ -5,6 +5,7 @@ const path = require('node:path');
 const { LocalStore } = require('../build/web/store');
 const { createApp } = require('../build/web/app');
 const { smtpSender } = require('../build/web/mail');
+const { assignmentContent } = require('../build/web/mail-template');
 const { EncryptedDatabase } = require('../build/web/database');
 async function diskState(file) { const db=await EncryptedDatabase.open(file,path.join(path.dirname(file),'../keys/storage.key'),path.join(path.dirname(file),'state.json'),()=>{});try{return db.read();}finally{db.close();} }
 async function writeState(file,state) { const db=await EncryptedDatabase.open(file,path.join(path.dirname(file),'../keys/storage.key'),path.join(path.dirname(file),'state.json'),()=>{});try{db.write(state);}finally{db.close();} }
@@ -108,6 +109,27 @@ test('web SMTP transport sends only the individual assignment and classifies def
   const input={to:'ana@example.invalid',name:'Ana',receiver:'Bea'};
   assert.equal(sender.configured,true);assert.equal(await sender.send(input),'accepted');
   assert.equal(options.secure,true);assert.equal(message.to,input.to);assert.match(message.text,/Hola Ana/);assert.match(message.text,/regalar a Bea/);assert.equal(message.cc,undefined);assert.equal(message.bcc,undefined);
+  assert.equal(message.subject,'Amigo invisible');
+  assert.equal(message.html,assignmentContent(input.name,input.receiver).html);
+  assert.equal(message.text,assignmentContent(input.name,input.receiver).text);
+  assert.doesNotMatch(message.html+message.text,/Cora|cora@example\.invalid|bea@example\.invalid|assignments|giver/);
   mode='reject';assert.equal(await sender.send(input),'failed');mode='timeout';assert.equal(await sender.send(input),'uncertain');assert.equal(closed,3);
  }finally{nodemailer.createTransport=original;}
+});
+test('preview leaves SQLite, key and delivery states unchanged and does not invoke SMTP',async()=>{
+ let calls=0;
+ const {store,file,confirm,payload}=await setup({configured:true,send:async()=>['accepted','failed','uncertain'][calls++]});
+ await confirm();await store.send(await payload());
+ assert.equal(calls,3);
+ const before=await diskState(file), bytes=await fs.readFile(file);
+ const keyPath=path.join(path.dirname(file),'../keys/storage.key'), key=await fs.readFile(keyPath);
+ const app=createApp(store);
+ for(let i=0;i<2;i++){
+  const preview=await app.fetch(new Request('http://localhost/mail-preview'));
+  assert.equal(preview.status,200);
+  const html=await preview.text();assert.match(html,/ejemplo ficticio/);
+  for(const p of before.participants){assert.equal(html.includes(p.name),false);assert.equal(html.includes(p.email),false);assert.equal(html.includes(p.id),false);}
+ }
+ assert.equal(calls,3);assert.deepEqual(await fs.readFile(file),bytes);assert.deepEqual(await fs.readFile(keyPath),key);
+ assert.deepEqual(await diskState(file),before);
 });

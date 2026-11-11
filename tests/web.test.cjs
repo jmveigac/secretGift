@@ -91,6 +91,9 @@ test('HTTP adapter accepts bodies, limits sizes and protects private routes', as
  assert.equal((await fetch(base+'/api/draw')).status,405);
  assert.equal(await (await fetch(base+'/api/state',{method:'HEAD'})).text(),'');
  const home=await fetch(base);const html=await home.text();
+ const preview=await fetch(base+'/mail-preview');assert.equal(preview.status,200);
+ assert.match(await preview.text(),/Mateo \(ejemplo ficticio\)/);
+ assert.equal(await (await fetch(base+'/mail-preview',{method:'HEAD'})).text(),'');
  assert.match(html,/secretGift/);assert.match(html,/<div id="root"><\/div>/);
  const assetPaths=[...html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map(match=>match[1]);
  assert.equal(assetPaths.length,2);

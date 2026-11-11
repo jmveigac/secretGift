@@ -35,6 +35,20 @@ beforeEach(() => {
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
+it('offers a static local preview independently of SMTP and describes encrypted storage accurately', async () => {
+    await load();
+    const preview = screen.getByRole('link', { name: 'Vista previa del correo' });
+    expect(preview).toHaveAttribute('href', '/mail-preview');
+    expect(preview).toHaveAttribute('target', '_blank');
+    expect(preview).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(preview).not.toHaveAttribute('aria-disabled');
+    expect(screen.getByText(/Solo datos ficticios/)).toHaveTextContent('no envía correos ni utiliza tu sorteo');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(window.confirm).not.toHaveBeenCalled();
+    expect(screen.getByText(/Uso local sin autenticación/)).toHaveTextContent('Los campos personales y las asignaciones privadas se guardan cifrados; SQLite no está cifrado íntegramente');
+    expect(document.body).not.toHaveTextContent('Se guardan sin cifrar');
+});
+
 describe('Fase 2 React interface', () => {
     it('loads participants from the API and presents only public state', async () => {
         await load();
