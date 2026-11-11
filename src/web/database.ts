@@ -5,6 +5,10 @@ import { randomBytes, randomUUID, createCipheriv, createDecipheriv } from 'node:
 import { storageLock } from './lock';
 import type { State } from './store';
 
+export class MissingDatabaseError extends Error {
+    constructor() { super('Storage database missing: restore the database with its original key'); }
+}
+
 // Only encrypted envelopes cross the SQLite boundary, including its journal/WAL.
 export class EncryptedDatabase {
     private constructor(private db: DatabaseSync, private key: Buffer) {}
@@ -33,6 +37,7 @@ export class EncryptedDatabase {
         try {
             const exists = await fs.stat(path).then(() => true, e => { if (e.code === 'ENOENT') return false; throw e; });
             let key: Buffer;
+            let newKey = false;
             try { key = await fs.readFile(keyPath); }
             catch (error) {
                 if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
@@ -44,6 +49,7 @@ export class EncryptedDatabase {
                 try { await file.writeFile(key); await file.sync(); } finally { await file.close(); }
                 const directory = await fs.open(dirname(keyPath), 'r');
                 try { await directory.sync(); } finally { await directory.close(); }
+                newKey = true;
             }
             if (key.length !== 32) throw new Error('Invalid storage key');
             await fs.chmod(dirname(keyPath), 0o700);
@@ -53,7 +59,12 @@ export class EncryptedDatabase {
             const workingPath = exists ? path : `${path}.${randomUUID()}.initializing`;
             if (!exists) {
                 try { initial = JSON.parse(await fs.readFile(legacy, 'utf8')); }
-                catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error('Invalid legacy storage'); }
+                catch (error) {
+                    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error('Invalid legacy storage');
+                    // A persistent key is evidence of prior initialization. Only a
+                    // validated legacy document can safely restart migration here.
+                    if (!newKey) throw new MissingDatabaseError();
+                }
                 validate(initial);
                 const file = await fs.open(workingPath, 'wx', 0o600); await file.close();
             }

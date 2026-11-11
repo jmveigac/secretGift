@@ -4,7 +4,7 @@ import { drawParticipants } from '../domain/draw';
 import type { Participant, StateResponse } from './contracts';
 import { smtpSender, type MailSender } from './mail';
 import { storageLock } from './lock';
-import { EncryptedDatabase } from './database';
+import { EncryptedDatabase, MissingDatabaseError } from './database';
 export type { Participant } from './contracts';
 
 export class AppError extends Error {
@@ -63,7 +63,10 @@ export class LocalStore {
             }
             try {
                 let state: State;
-                try { state = await this.read(); } catch { throw new Error('Storage unavailable'); }
+                try { state = await this.read(); } catch (error) {
+                    if (error instanceof MissingDatabaseError) throw error;
+                    throw new Error('Storage unavailable');
+                }
                 return await operation(state);
             } finally { await release?.(); }
         });

@@ -77,6 +77,9 @@ Restaura el par de respaldos de la misma instalación con la web detenida y los
 volúmenes de destino vacíos. Conserva la copia anterior hasta verificar los
 participantes y estados restaurados. Perder la clave impide recuperar los datos;
 la aplicación rechaza una base con clave ausente, incorrecta o datos dañados.
+Si existe la clave pero faltan SQLite y el JSON heredado, el arranque se detiene
+para evitar crear una base vacía. Restaura la base con su clave correspondiente
+siguiendo el procedimiento anterior.
 
 El cifrado AES-256-GCM protege los campos personales y las relaciones privadas;
 **no cifra todo el archivo SQLite**. Identificadores técnicos, fechas y estados

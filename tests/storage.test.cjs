@@ -40,6 +40,35 @@ test('migration preserves IDs, exclusions, private assignments, revisions, every
  db=await inspect(f);assert.deepEqual(db.read(),state);db.close();
  assert.doesNotMatch(JSON.stringify(view),/assignments|receiver|giver|storage.key/);
 });
+test('persistent key without SQLite or legacy data fails closed, then accepts the restored database',async()=>{
+ const f=await fixture();await f.store().mutate('add',person(1));
+ const key=await fs.readFile(f.key), before=await fs.readFile(f.file);
+ await fs.rename(path.dirname(f.file),path.join(f.root,'saved-data'));
+ for(let attempt=0;attempt<2;attempt++){
+  await assert.rejects(f.store().status(),/Storage database missing: restore the database with its original key/);
+  await assert.rejects(fs.stat(f.file),{code:'ENOENT'});
+  assert.deepEqual(await fs.readFile(f.key),key);
+  assert.equal((await fs.readdir(path.dirname(f.file))).some(name=>name.endsWith('.initializing')),false);
+ }
+ const {spawnSync}=require('node:child_process');
+ const startup=spawnSync(process.execPath,['build/web/server.js'],{
+  env:{...process.env,DATA_FILE:f.file,DATA_KEY_FILE:f.key},encoding:'utf8',timeout:10000
+ });
+ assert.ifError(startup.error);assert.equal(startup.status,1);
+ assert.match(startup.stderr,/Falta la base SQLite, pero existe la clave: restaura la base con su clave original/);
+ await assert.rejects(fs.stat(f.file),{code:'ENOENT'});
+ await fs.copyFile(path.join(f.root,'saved-data/state.sqlite'),f.file);
+ assert.deepEqual((await f.store().status()).participants.map(({id,...p})=>p),[person(1)]);
+ assert.deepEqual(await fs.readFile(f.file),before);
+});
+test('restoring SQLite with its matching key preserves the entire state without legacy JSON',async()=>{
+ const source=await fixture(),state=legacyState();await seed(source,state);await source.store().status();
+ const restored=await fixture();
+ await fs.mkdir(path.dirname(restored.file),{recursive:true});await fs.mkdir(path.dirname(restored.key),{recursive:true});
+ await fs.copyFile(source.file,restored.file);await fs.copyFile(source.key,restored.key);
+ await restored.store().status();
+ const db=await inspect(restored);try{assert.deepEqual(db.read(),state);}finally{db.close();}
+});
 test('legacy participants without draw migrate without import of CLI historical files',async()=>{
  const f=await fixture(),state=legacyState();state.draw=null;await seed(f,state);
  assert.deepEqual((await f.store().status()).participants,state.participants);
