@@ -16,7 +16,21 @@ export const createApp = (store = new LocalStore()) => ({
             const url = new URL(request.url), path = url.pathname, method = request.method;
             const asset = /^\/assets\/[A-Za-z0-9_-]+\.(js|css)$/.exec(path);
             const participant = /^\/api\/participants\/([\da-f-]{36})$/.exec(path);
-            const methods = path === '/' || asset || path === '/mail-preview' || path === '/api/health' || path === '/api/state' ? ['GET', 'HEAD'] : path === '/api/participants' || path === '/api/draw' || path === '/api/draw/reset' || path === '/api/draw/send' ? ['POST'] : participant ? ['PUT', 'DELETE'] : null;
+            const group = /^\/api\/groups\/([\da-f-]{36})$/.exec(path);
+            const people = /^\/api\/groups\/([\da-f-]{36})\/people(?:\/([\da-f-]{36}))?$/.exec(path);
+            const editions = /^\/api\/groups\/([\da-f-]{36})\/editions$/.exec(path);
+            const scoped = /^\/api\/groups\/([\da-f-]{36})\/editions\/([\da-f-]{36})(?:\/(participants)(?:\/([\da-f-]{36}))?|\/(draw)(?:\/(send|reset))?)?$/.exec(path);
+            const [, scopedGroupId, editionId, resource, memberId, drawResource, drawAction] = scoped ?? [];
+            const scope = scoped ? { groupId: scopedGroupId, editionId } : undefined;
+            let methods: string[] | null = null;
+            if (path === '/api/groups') methods = ['GET', 'HEAD', 'POST'];
+            else if (group) methods = ['GET', 'HEAD', 'PUT'];
+            else if (people) methods = people[2] ? ['PUT'] : ['POST'];
+            else if (editions) methods = ['POST'];
+            else if (scoped) methods = resource === 'participants' ? memberId ? ['PUT', 'DELETE'] : ['POST'] : drawResource ? ['POST'] : ['GET', 'HEAD'];
+            else if (path === '/' || asset || path === '/mail-preview' || path === '/api/health' || path === '/api/state') methods = ['GET', 'HEAD'];
+            else if (path === '/api/participants' || path === '/api/draw' || path === '/api/draw/reset' || path === '/api/draw/send') methods = ['POST'];
+            else if (participant) methods = ['PUT', 'DELETE'];
             if (!methods) return json({ error: 'Ruta no encontrada.' }, 404);
             if (!methods.includes(method)) return json({ error: 'Método no permitido.' }, 405, { Allow: methods.join(', ') });
             if (method === 'GET' || method === 'HEAD') {
@@ -38,7 +52,9 @@ export const createApp = (store = new LocalStore()) => ({
                     const type = path === '/' ? 'text/html' : asset?.[1] === 'css' ? 'text/css' : 'text/javascript';
                     result = new Response(content, { headers: { ...headers, 'Content-Type': `${type}; charset=utf-8` } });
                 }
-                else result = json(path === '/api/health' ? { status: 'ok' } : await store.status());
+                else if (path === '/api/groups') result = json(await store.groups());
+                else if (group) result = json(await store.group(group[1]));
+                else result = json(path === '/api/health' ? { status: 'ok' } : await store.status(scope));
                 return method === 'HEAD' ? new Response(null, { status: result.status, headers: result.headers }) : result;
             }
             // Reject browser cross-origin writes, including simple form submissions.
@@ -54,6 +70,15 @@ export const createApp = (store = new LocalStore()) => ({
             }
             let input: unknown;
             try { input = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { return json({ error: 'JSON no válido.' }, 400); }
+            if (path === '/api/groups') return json(await store.manage('createGroup', input), 201);
+            if (group) return json(await store.manage('renameGroup', input, group[1]));
+            if (people) return json(await store.manage(people[2] ? 'editPerson' : 'addPerson', input, people[1], people[2]), people[2] ? 200 : 201);
+            if (editions) return json(await store.manage('createEdition', input, editions[1]), 201);
+            if (scope) {
+                if (drawAction === 'send') return json(await store.send(input, scope));
+                const action = drawResource ? drawAction === 'reset' ? 'reset' : 'draw' : !memberId ? 'add' : method === 'DELETE' ? 'delete' : 'edit';
+                return json(await store.mutate(action, input, memberId, scope), action === 'add' ? 201 : 200);
+            }
             if (path === '/api/draw/send') return json(await store.send(input));
             const action = path === '/api/draw' ? 'draw' : path === '/api/draw/reset' ? 'reset' : participant ? method === 'DELETE' ? 'delete' : 'edit' : 'add';
             return json(await store.mutate(action, input, participant?.[1]), action === 'add' ? 201 : 200);
