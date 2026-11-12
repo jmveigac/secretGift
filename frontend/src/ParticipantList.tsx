@@ -18,7 +18,7 @@ export default function ParticipantList({ participants, max, disabled, onEdit, o
                 return <li key={participant.id}>
                     <div className="participant-details">
                         <strong>{participant.name}</strong><span>{participant.email}</span>
-                        {previous && <span>Año anterior: {previous.name}</span>}
+                        {previous && <span>Restricción manual: {previous.name}</span>}
                     </div>
                     <div>
                         <button disabled={disabled} onClick={() => onEdit(participant)} aria-label={`Editar a ${participant.name}`}>Editar</button>

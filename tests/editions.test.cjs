@@ -28,7 +28,7 @@ test('new installation creates one group and edition, then persists stable ident
  const groups=db.listGroups();assert.equal(groups.length,1);
  const editions=db.listEditions(groups[0].id);assert.equal(editions.length,1);
  assert.deepEqual(db.read(),{version:1,participants:[],draw:null});db.close();
- assert.equal(version(f.file),2);db=await f.open();
+ assert.equal(version(f.file),3);db=await f.open();
  assert.deepEqual(db.listGroups(),groups);assert.deepEqual(db.listEditions(groups[0].id),editions);db.close();
 });
 test('v1 migration preserves participants, IDs, exclusions, dates, revisions and all SMTP states with the original key',async()=>{
@@ -43,7 +43,7 @@ test('v1 migration preserves participants, IDs, exclusions, dates, revisions and
    assert.equal(edition.year,drawn?2025:new Date().getUTCFullYear());
    assert.deepEqual(db.listPeople(group.id).map(p=>p.id),original.participants.map(p=>p.id));
   }finally{db.close();}
-  assert.equal(version(f.file),2);assert.deepEqual(await fs.readFile(f.key),key);
+  assert.equal(version(f.file),3);assert.deepEqual(await fs.readFile(f.key),key);
   const restarted=await f.open();try{assert.deepEqual(restarted.read(),original);}finally{restarted.close();}
  }
 });

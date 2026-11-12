@@ -19,7 +19,7 @@ const completed: StateResponse = {
 const response = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status });
 const fetchMock = vi.fn<typeof fetch>();
 const button = (name: string) => screen.getByRole('button', { name });
-const recipient = () => screen.getByLabelText('Destinatario del año anterior (opcional)');
+const recipient = () => screen.getByLabelText('Restricción manual: destinatario anterior (opcional)');
 const nameInput = () => screen.getByLabelText('Nombre');
 const emailInput = () => screen.getByLabelText('Correo');
 async function load(state = initial) {
@@ -39,7 +39,7 @@ describe('Fase 2 React interface', () => {
     it('loads participants from the API and presents only public state', async () => {
         await load();
         expect(screen.getByText('3 / 15 participantes')).toBeInTheDocument();
-        expect(screen.getByText('Año anterior: Bea')).toBeInTheDocument();
+        expect(screen.getByText('Restricción manual: Bea')).toBeInTheDocument();
         expect(fetchMock).toHaveBeenCalledWith('/api/state', expect.objectContaining({ cache: 'no-store' }));
         expect(document.body).not.toHaveTextContent(/"assignments"|"giver"|"receiver"/);
         expect(button('Reiniciar sorteo')).toBeDisabled();
@@ -94,7 +94,7 @@ describe('Fase 2 React interface', () => {
         fetchMock.mockResolvedValueOnce(response({ ...initial, participants: initial.participants.filter(p => p.id !== 'b').map(p => ({ ...p, previousId: null })) }));
         await user.click(button('Eliminar a Bea'));
         await waitFor(() => expect(screen.queryByText('bea@example.invalid')).not.toBeInTheDocument());
-        expect(screen.queryByText('Año anterior: Bea')).not.toBeInTheDocument();
+        expect(screen.queryByText('Restricción manual: Bea')).not.toBeInTheDocument();
         expect(fetchMock).toHaveBeenLastCalledWith('/api/participants/b', expect.objectContaining({ method: 'DELETE' }));
     });
 

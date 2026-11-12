@@ -16,7 +16,7 @@ export default function DrawPanel({ state, pending, sending, onDraw, onReset, on
         <h2 id="draw-title">Estado del sorteo</h2>
         <p>{state.draw.completed
             ? `Sorteo completado · ${state.draw.participantCount} participantes. Las asignaciones permanecen privadas.`
-            : 'Pendiente. Nadie se regalará a sí mismo ni repetirá el destinatario anterior. La viabilidad se comprobará al realizar el sorteo.'}</p>
+            : 'Pendiente. Nadie se regalará a sí mismo ni repetirá el destinatario anterior. Se aplicará el último antecedente verificado de cada persona en este grupo; sin él, su restricción manual. El historial privado no se muestra. La viabilidad se comprobará al realizar el sorteo.'}</p>
         <button disabled={busy || state.draw.completed || state.participants.length < 2} onClick={onDraw}>Realizar sorteo</button>
         {state.draw.completed && <p>Fecha del sorteo: {new Date(state.draw.completedAt).toLocaleString('es-ES')}</p>}
         <button className="secondary" disabled={busy || !state.draw.completed} onClick={onReset}>Reiniciar sorteo</button>

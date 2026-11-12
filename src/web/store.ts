@@ -69,7 +69,7 @@ export class LocalStore {
     private async checkRevision(state: State, input: unknown, scope?: EditionScope) {
         if (!scope) return;
         const revision = (input as { expectedRevision?: unknown })?.expectedRevision;
-        const current = await this.database(db => db.fingerprint(`edition:${scope.groupId}:${scope.editionId}`, state));
+        const current = await this.database(db => db.fingerprint(`edition:${scope.groupId}:${scope.editionId}`, { state, history: db.historyRevision(scope) }));
         if (typeof revision !== 'string' || revision !== current) throw new AppError(409, 'La edición ha cambiado. Actualiza su estado antes de continuar.');
     }
     private groupView(db: EncryptedDatabase, groupId: string): GroupResponse {
@@ -137,7 +137,7 @@ export class LocalStore {
     }
     private async view(state: State, scope?: EditionScope): Promise<StateResponse> {
         const view = this.publicView(state);
-        return scope ? { ...view, scope, revision: await this.database(db => db.fingerprint(`edition:${scope.groupId}:${scope.editionId}`, state)) } : view;
+        return scope ? { ...view, scope, revision: await this.database(db => db.fingerprint(`edition:${scope.groupId}:${scope.editionId}`, { state, history: db.historyRevision(scope) })) } : view;
     }
     status(scope?: EditionScope) { return this.run(async state => this.view(state, scope), false, scope); }
     async send(input: unknown, scope?: EditionScope) {
@@ -195,10 +195,11 @@ export class LocalStore {
                 if (state.draw) throw new AppError(409, 'Reinicia el sorteo antes de modificar los datos.');
                 if (action === 'draw') {
                     if (body.confirm !== true) throw new AppError(400, 'Confirma la ejecución del sorteo.');
-                    const source = state.participants.map(p => ({ name: p.id, email: p.email, lastGift: p.previousId ?? '' }));
+                    const restrictions = await this.database(db => db.effectiveRestrictions(state, scope));
+                    const source = state.participants.map(p => ({ name: p.id, email: p.email, lastGift: restrictions[p.id] ?? '' }));
                     let result;
                     try { result = drawParticipants(source, randomInt); } catch { throw new AppError(422, 'No existe un sorteo válido con estos participantes y restricciones.'); }
-                    state.draw = { completedAt: new Date().toISOString(), deliveryRevision: randomUUID(), assignments: result.map(p => ({ giver: p.name, receiver: p.lastGift })) };
+                    state.draw = { restrictions, completedAt: new Date().toISOString(), deliveryRevision: randomUUID(), assignments: result.map(p => ({ giver: p.name, receiver: p.lastGift })) };
                 } else {
                     const index = state.participants.findIndex(p => p.id === id);
                     if (action !== 'add' && index < 0) throw new AppError(404, 'Participante no encontrado.');

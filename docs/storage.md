@@ -1,4 +1,4 @@
-# Modelo SQLite v2
+# Modelo SQLite v3
 
 `PRAGMA user_version` versiona el esquema; `State.version=1` sigue describiendo
 el estado de una edición; el contrato HTTP anterior sigue siendo compatible. Los tipos y su
@@ -68,7 +68,7 @@ si el volumen deja de ser pequeño y local.
 
 ## API de grupos y ediciones
 
-El esquema sigue en v2 y los sobres cifrados no cambian. No hay selección global
+El esquema pasa a v3; los sobres cifrados existentes no cambian. No hay selección global
 de grupo o edición en el servidor: cada operación nueva lleva ambos IDs en la URL.
 
 | Ruta | Operaciones |
@@ -106,5 +106,57 @@ de compatibilidad solo si esa era la edición de trabajo anterior.
 Los endpoints anteriores siguen operando sobre `compatibility`, no sobre la
 selección del navegador; la nueva interfaz utiliza exclusivamente rutas con
 ámbito. Los resúmenes no contienen asignaciones y el estado público conserva la
-lista explícita de campos de `StateResponse`. El historial sigue sin intervenir
-en el algoritmo de restricciones.
+lista explícita de campos de `StateResponse`. Los antecedentes intervienen internamente en el algoritmo sin exponerse en estas respuestas.
+
+
+## Orden histórico y restricciones (v3)
+
+La migración v2→v3 añade a `draw` `history_sequence` (entero positivo nullable),
+`restrictions` (BLOB cifrado nullable) y un índice único `(group_id, history_sequence)`.
+Autentica y valida toda la base antes del DDL, valida después y confirma columnas,
+índice y `user_version=3` en una transacción `BEGIN IMMEDIATE`. Una interrupción
+revierte la transacción; el siguiente arranque puede reintentar. No reescribe
+asignaciones, contactos, fechas, estados SMTP ni la clave. Las entradas v1 pasan
+primero por la migración existente a v2; una interrupción entre ambas deja v2
+válida y la migración a v3 se reintenta al abrir.
+
+Cada sorteo nuevo recibe `MAX(history_sequence)+1` de su grupo dentro de la
+transacción que guarda el resultado completo. La secuencia representa el orden
+real de confirmación; no el año de referencia, la creación de ediciones ni el reloj.
+Varias ediciones del mismo año se ordenan por confirmación. Una edición antigua
+pendiente y una continuación se sitúan cuando se sortean; hasta entonces carecen
+de posición y no aportan antecedentes. La secuencia se conserva al actualizar SMTP.
+La lectura de antecedentes, control de revisión y escritura HTTP comparten el
+bloqueo de almacenamiento. El repositorio vuelve a comprobar las restricciones
+antes de guardar en su transacción. La revisión HMAC de edición incluye los
+antecedentes aplicables para rechazar confirmaciones obsoletas.
+
+En grupos con varios sorteos migrados, esas entradas quedan con secuencia y
+restricciones `NULL`: no hay datos suficientes para certificar su secuencia real. No se deduce de UUID, `rowid`,
+nombre, año ni fecha del sorteo, ni siquiera cuando las fechas son distintas.
+Si un grupo contiene un solo sorteo al migrar, recibe la posición 1: no hay
+ambigüedad relativa y precede inequívocamente a las futuras confirmaciones. Sus
+restricciones permanecen `NULL`; su instantánea y envíos siguen siendo válidos
+con las reglas originales. No existe interfaz para ordenar estas entradas. Una futura importación
+podrá proporcionar posiciones explícitas en esta secuencia por grupo, verificando
+su relación con las posiciones existentes; esta fase no implementa importación
+ni inserción o reordenación histórica.
+
+Para cada ID estable se toma su última asignación en una edición del mismo grupo
+con secuencia menor; una edición pendiente utiliza las posiciones ya confirmadas.
+Cada persona puede tener un antecedente de una edición diferente. Se ignoran las
+ediciones sin secuencia verificada y sin sorteo. No se buscan coincidencias de
+contacto ni se acumulan destinatarios de años anteriores. El destinatario automático
+tiene prioridad sobre `previousId`; si ya no participa, no se añade exclusión y
+no se recupera la manual como sustituto. Sin antecedente verificado se conserva
+`previousId`. La interfaz identifica este campo como manual.
+
+`drawParticipants` recibe IDs como identificadores y mantiene su emparejamiento
+aleatorio. Se prohíben la autoasignación y el destinatario anterior aplicable,
+exigiendo una permutación completa. Si no existe solución, HTTP devuelve 422
+sin parejas privadas ni modificaciones persistidas. Las restricciones efectivas
+se guardan cifradas con AAD de grupo/edición, como instantánea inmutable del sorteo.
+`validateState` usa esa instantánea para los nuevos sorteos y `previousId` para
+los heredados; no reinterpreta sorteos confirmados al crecer el historial.
+Los endpoints mantienen listas explícitas de campos públicos: nunca devuelven
+asignaciones, la instantánea de restricciones ni destinatarios históricos.

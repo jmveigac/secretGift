@@ -100,7 +100,21 @@ export class EncryptedDatabase {
                     if (!isDeepStrictEqual(source, store.readCurrent())) throw new Error('Migration verification failed');
                     db!.exec('PRAGMA user_version=2');
                 });
-            } else if (version !== 2) throw new Error('Incompatible database');
+            } else if (version !== 2 && version !== 3) throw new Error('Incompatible database');
+            if (version !== 3) store.transaction(() => {
+                store.checkIntegrity(); store.authenticate(); store.validateAll();
+                const before = store.snapshot();
+                // Multiple legacy draws have no verifiable relative order.
+                db!.exec("ALTER TABLE draw ADD COLUMN history_sequence INTEGER CHECK(history_sequence IS NULL OR (typeof(history_sequence)='integer' AND history_sequence BETWEEN 1 AND 9007199254740991))");
+                db!.exec('ALTER TABLE draw ADD COLUMN restrictions BLOB');
+                db!.exec('CREATE UNIQUE INDEX draw_history_sequence ON draw(group_id, history_sequence)');
+                // A sole existing draw is unambiguously before all future confirmations.
+                db!.exec(`UPDATE draw SET history_sequence=1 WHERE group_id IN
+                    (SELECT group_id FROM draw GROUP BY group_id HAVING COUNT(*)=1)`);
+                store.validateAll();
+                if (!isDeepStrictEqual(before, store.snapshot())) throw new Error('Migration verification failed');
+                db!.exec('PRAGMA user_version=3');
+            });
             store.transaction(() => {
                 store.checkIntegrity();
                 store.authenticate();
@@ -277,6 +291,7 @@ export class EncryptedDatabase {
         const state: State = { version: 1, participants, draw: draw ? {
             completedAt: draw.completed_at as string,
             ...(draw.revision === null ? {} : { deliveryRevision: draw.revision as string }),
+            ...(draw.restrictions == null ? {} : { restrictions: this.unseal(draw.restrictions, this.scope(groupId, editionId, 'restrictions')) }),
             assignments: assignments.map(row => ({ giver: row.giver as string, receiver: this.unseal(row.private, this.scope(groupId, editionId, 'assignment', row.giver as string)) })),
             deliveries: Object.fromEntries(assignments.map(row => [row.giver, row.status]))
         } : null };
@@ -299,6 +314,10 @@ export class EncryptedDatabase {
             deliveries: Object.fromEntries(assignments.map(row => [row.giver, row.status]))
         } : null };
     }
+    private snapshot() {
+        return this.listGroups().map(group => ({ group, people: this.listPeople(group.id),
+            editions: this.listEditions(group.id).map(edition => ({ edition, state: this.readState(group.id, edition.id) })) }));
+    }
     private validateAll() {
         this.checkIntegrity();
         for (const group of this.listGroups()) {
@@ -318,30 +337,75 @@ export class EncryptedDatabase {
     }
     private replace(groupId: string, editionId: string, state: State) {
         this.requireEdition(groupId, editionId); validateState(state);
+        const sequence = this.db.prepare('SELECT * FROM draw WHERE group_id=? AND edition_id=?').get(groupId, editionId)?.history_sequence;
         this.db.prepare('DELETE FROM assignments WHERE group_id=? AND edition_id=?').run(groupId, editionId);
         this.db.prepare('DELETE FROM draw WHERE group_id=? AND edition_id=?').run(groupId, editionId);
         this.db.prepare('DELETE FROM participants WHERE group_id=? AND edition_id=?').run(groupId, editionId);
         const participant = this.db.prepare('INSERT INTO participants VALUES (?, ?, ?, ?, ?)');
         state.participants.forEach(({ id, ...data }, position) => participant.run(groupId, editionId, id, position, this.seal(data, this.scope(groupId, editionId, 'participant', id))));
         if (state.draw) {
-            this.db.prepare('INSERT INTO draw VALUES (?, ?, ?, ?)').run(groupId, editionId, state.draw.completedAt, state.draw.deliveryRevision ?? null);
+            this.db.prepare('INSERT INTO draw (group_id, edition_id, completed_at, revision) VALUES (?, ?, ?, ?)').run(groupId, editionId, state.draw.completedAt, state.draw.deliveryRevision ?? null);
+            if (sequence != null) this.db.prepare('UPDATE draw SET history_sequence=? WHERE group_id=? AND edition_id=?').run(sequence, groupId, editionId);
+            if (state.draw.restrictions) this.db.prepare('UPDATE draw SET restrictions=? WHERE group_id=? AND edition_id=?').run(
+                this.seal(state.draw.restrictions, this.scope(groupId, editionId, 'restrictions')), groupId, editionId);
             const assignment = this.db.prepare('INSERT INTO assignments VALUES (?, ?, ?, ?, ?)');
             for (const { giver, receiver } of state.draw.assignments) assignment.run(groupId, editionId, giver, this.seal(receiver, this.scope(groupId, editionId, 'assignment', giver)), state.draw.deliveries?.[giver] ?? 'pending');
         }
     }
+    /** Internal only: never serialize these IDs in HTTP responses. */
+    previousRecipients(scope?: { groupId: string; editionId: string }): Record<string, string> {
+        const { groupId, editionId } = scope ?? this.current();
+        this.requireEdition(groupId, editionId);
+        const target = this.db.prepare('SELECT history_sequence FROM draw WHERE group_id=? AND edition_id=?').get(groupId, editionId);
+        const result: Record<string, string> = {};
+        if (target && target.history_sequence == null) return result;
+        const rows = this.db.prepare(`SELECT edition_id, history_sequence FROM draw WHERE group_id=? AND history_sequence IS NOT NULL
+            ORDER BY history_sequence`).all(groupId);
+        for (const row of rows) {
+            if (row.edition_id === editionId || (target?.history_sequence != null && Number(row.history_sequence) >= Number(target.history_sequence))) continue;
+            const state = this.readState(groupId, row.edition_id as string);
+            for (const a of state.draw!.assignments) result[a.giver] = a.receiver;
+        }
+        return result;
+    }
+    effectiveRestrictions(state: State, scope?: { groupId: string; editionId: string }): Record<string, string | null> {
+        const history = this.previousRecipients(scope), ids = new Set(state.participants.map(p => p.id));
+        return Object.fromEntries(state.participants.map(p => {
+            const recipient = history[p.id] ?? p.previousId;
+            return [p.id, recipient && ids.has(recipient) ? recipient : null];
+        }));
+    }
+    historyRevision(scope: { groupId: string; editionId: string }): string {
+        return this.fingerprint('history', this.previousRecipients(scope));
+    }
+    private confirmHistory(groupId: string, editionId: string, before: State, after: State) {
+        if (before.draw || !after.draw) return;
+        const restrictions = this.effectiveRestrictions(after, { groupId, editionId });
+        // Direct repository callers also receive enforced restrictions.
+        after.draw.restrictions = restrictions;
+        validateState(after);
+    }
+    private sequenceDraw(groupId: string, editionId: string, before: State, after: State) {
+        if (before.draw || !after.draw) return;
+        this.db.prepare(`UPDATE draw SET history_sequence=(SELECT COALESCE(MAX(history_sequence),0)+1 FROM draw WHERE group_id=?)
+            WHERE group_id=? AND edition_id=?`).run(groupId, groupId, editionId);
+    }
     private checkDrawUnchanged(before: State, after: State) {
         if (before.draw && (!after.draw || !isDeepStrictEqual(before.participants, after.participants)
+            || !isDeepStrictEqual(before.draw.restrictions, after.draw.restrictions)
             || before.draw.completedAt !== after.draw.completedAt || !isDeepStrictEqual(before.draw.assignments, after.draw.assignments))) throw new Error('Drawn editions retain their participants and assignments');
     }
     writeEdition(groupId: string, editionId: string, state: State, newPerson?: Person) {
         this.transaction(() => {
             const before = this.readState(groupId, editionId);
             this.checkDrawUnchanged(before, state);
+            this.confirmHistory(groupId, editionId, before, state);
             if (newPerson) {
                 if (this.listPeople(groupId).some(p => p.id === newPerson.id)) throw new Error('Person already exists');
                 this.savePerson(groupId, newPerson);
             }
             this.replace(groupId, editionId, state);
+            this.sequenceDraw(groupId, editionId, before, state);
         });
     }
     forkEdition(groupId: string, editionId: string): Edition {
@@ -372,7 +436,9 @@ export class EncryptedDatabase {
                 this.db.prepare('UPDATE compatibility SET edition_id=? WHERE id=1').run(edition.id);
             } else {
                 this.checkDrawUnchanged(before, state);
+                this.confirmHistory(groupId, editionId, before, state);
                 this.replace(groupId, editionId, state);
+                this.sequenceDraw(groupId, editionId, before, state);
             }
         });
     }

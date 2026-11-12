@@ -24,7 +24,7 @@ export default function ParticipantForm({ participant, participants, disabled, o
                 <input id="participant-name" value={name} onChange={e => setName(e.target.value)} required maxLength={100} autoComplete="off" />
                 <label htmlFor="participant-email">Correo</label>
                 <input id="participant-email" type="email" value={email} onChange={e => setEmail(e.target.value)} required maxLength={254} autoComplete="off" />
-                <label htmlFor="previous">Destinatario del año anterior (opcional)</label>
+                <label htmlFor="previous">Restricción manual: destinatario anterior (opcional)</label>
                 <select id="previous" value={previousId} onChange={e => setPreviousId(e.target.value)}>
                     <option value="">Sin restricción anterior</option>
                     {participants.filter(p => p.id !== participant?.id).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
