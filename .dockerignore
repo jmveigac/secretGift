@@ -7,6 +7,8 @@
 !src/web/**
 !src/domain/
 !src/domain/**
+!src/import/
+!src/import/**
 !src/models/
 !src/models/participants.ts
 !vite.config.mts

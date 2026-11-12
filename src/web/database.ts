@@ -5,6 +5,7 @@ import { randomBytes, randomUUID, createCipheriv, createDecipheriv, createHmac }
 import { storageLock } from './lock';
 import { validateState, type State, type Group, type Person, type Edition } from '../domain/editions';
 import { isDeepStrictEqual } from 'node:util';
+import { ImportError, parseLegacy, parseImportPlan, prepareLegacyImport } from '../domain/legacy-import';
 
 export class MissingDatabaseError extends Error {
     constructor() { super('Storage database missing: restore the database with its original key'); }
@@ -441,6 +442,40 @@ export class EncryptedDatabase {
                 this.sequenceDraw(groupId, editionId, before, state);
             }
         });
+    }
+    /** Caller must hold storageLock(path), shared with all web writers and SMTP. */
+    importLegacy(input: unknown, planInput: unknown, max = 15, confirmation?: string) {
+        return this.transaction(() => {
+            if (this.db.prepare('PRAGMA user_version').get()!.user_version !== 3) throw new ImportError('La importación requiere SQLite v3.');
+            if (!Number.isInteger(max) || max < 2 || max > 100) throw new ImportError('Límite de participantes incorrecto.');
+            const records = parseLegacy(input), plan = parseImportPlan(planInput, records.length);
+            const groups = this.listGroups(), target = plan.target;
+            const group = 'groupId' in target ? groups.find(g => g.id === target.groupId) : undefined;
+            if ('groupId' in plan.target && !group) throw new ImportError('El grupo de destino no existe.');
+            if ('newGroup' in target && groups.some(g => g.name.toLowerCase() === target.newGroup.toLowerCase())) throw new ImportError('Ya existe un grupo con ese nombre; selecciona su ID explícitamente.');
+            const context = { people: group ? this.listPeople(group.id) : [], editions: group ? this.listEditions(group.id).map(edition => ({
+                edition, state: this.readState(group.id, edition.id),
+                sequence: (this.db.prepare('SELECT history_sequence FROM draw WHERE group_id=? AND edition_id=?').get(group.id, edition.id)?.history_sequence ?? null) as number | null
+            })) : [] };
+            const prepared = prepareLegacyImport(records, plan, context, max);
+            const token = this.fingerprint('legacy-import:1', { records, plan, target: group ?? groups, context, max });
+            if (confirmation !== undefined && confirmation !== token) throw new ImportError('La vista previa ha cambiado; vuelve a validar antes de confirmar.');
+            if (confirmation !== undefined) {
+                const destination = group ?? this.insertGroup(('newGroup' in plan.target) ? plan.target.newGroup : '');
+                for (const person of prepared.newPeople) this.savePerson(destination.id, person);
+                const edition = this.insertEdition(destination.id, plan.edition.name, plan.edition.year);
+                // Import already-generated assignments; never call the draw algorithm or SMTP.
+                this.replace(destination.id, edition.id, prepared.state);
+                if (prepared.state.draw) this.db.prepare('UPDATE draw SET history_sequence=? WHERE group_id=? AND edition_id=?').run(plan.history!.sequence, destination.id, edition.id);
+                if (!isDeepStrictEqual(this.readState(destination.id, edition.id), prepared.state)) throw new ImportError('No se pudo verificar la importación; se revierte completa.');
+                this.checkIntegrity();
+            }
+            return { imported: confirmation !== undefined, mode: plan.mode, records: records.length,
+                participants: prepared.state.participants.length, newPeople: prepared.newPeople.length,
+                linkedPeople: prepared.state.participants.length - prepared.newPeople.length, skipped: prepared.skipped,
+                unknownDeliveries: prepared.state.draw ? prepared.state.participants.length : 0,
+                ...(confirmation === undefined ? { confirmation: token } : {}) };
+        }, confirmation !== undefined);
     }
     close() { this.db.close(); this.key.fill(0); }
 }

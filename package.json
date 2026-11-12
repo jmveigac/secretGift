@@ -5,6 +5,7 @@
   "main": "build/index.js",
   "bin": "./build/index.js",
   "scripts": {
+    "import:cli": "ts-node src/import/cli.ts",
     "start": "ts-node --transpile-only ./src/index.ts",
     "build": "tsc",
     "build-check": "tsc --noEmit && tsc -p frontend/tsconfig.json",
