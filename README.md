@@ -77,7 +77,7 @@ del mismo directorio, sin sortear ni enviar correos. Conserva participantes,
 restricciones, sorteo y estados de envío. El JSON original permanece sin cifrar:
 comprueba en la interfaz los participantes, la confirmación y los contadores de
 envío, reinicia y verifica de nuevo. Haz una copia de seguridad antes de retirar
-explícitamente ese JSON. No se importa `newParticipants.json` de la CLI.
+explícitamente ese JSON. Los archivos de la CLI no se importan automáticamente.
 Si la migración falla, corrige el problema y vuelve a arrancar; una base existente
 no se sobrescribe. No borres una base para intentar corregir un error de clave.
 
@@ -160,6 +160,37 @@ rechazo en un servidor SMTP de prueba, consulta el fallo y reintenta tras correg
 los aceptados no deben reenviarse ni cambiar las asignaciones. Reinicia con
 `docker compose restart` y comprueba que se conservan los estados. Si se interrumpe
 un envío, revisa los buzones antes de decidir si reenvías los inciertos.
+
+## Importar archivos de la CLI
+
+La importación es un comando independiente: no sortea ni envía correos. Admite
+el array JSON de la CLI, directamente o codificado en Base64. Declara en un plan
+si son restricciones manuales (`manual`) o asignaciones generadas (`assignments`);
+el nombre del archivo no determina su significado. Prepara las asociaciones con
+IDs existentes, altas nuevas u omisiones según el [formato del plan](docs/storage.md#importación-explícita-de-la-cli).
+
+Con Node.js 26 y `npm ci`, usa una instalación web ya inicializada en SQLite v3.
+Antes de confirmar, detén la web y [copia la base y su clave](#datos-migración-y-copias).
+Guarda el origen y el plan en una carpeta privada excluida de Git, como `.task/import`:
+
+```bash
+npm run import:cli -- --source .task/import/origen.json --plan .task/import/plan.json
+```
+
+Sin confirmación solo valida y muestra contadores y un código. Revisa el plan y
+confirma repitiendo el comando con `--confirm CODIGO`. Usa `--data` y `--key`
+para seleccionar la base y su clave, o las variables `DATA_FILE` y `DATA_KEY_FILE`.
+Para volúmenes Docker, consulta el [procedimiento de importación](docs/storage.md#importación-explícita-de-la-cli).
+
+Las restricciones crean una edición pendiente y no necesitan fecha histórica.
+Las asignaciones exigen fecha **y hora reales conocidas**, además de una posición
+cronológica explícita y compatible. Solo el año o el día no bastan; tampoco se
+puede insertar antes de una posición 1 ocupada sin reordenar, operación no admitida.
+Sus entregas quedan inciertas, nunca aceptadas, y requieren confirmación adicional
+si después decides enviarlas desde la web. No se sobrescriben ediciones ni contactos.
+Si hay conflictos, corrige el plan y repite la vista previa; un fallo revierte toda
+la importación. Para deshacer una importación confirmada, restaura la copia previa
+con la web detenida. Los archivos originales se conservan.
 
 ## CLI heredada
 

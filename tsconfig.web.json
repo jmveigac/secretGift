@@ -17,6 +17,7 @@
     "outDir": "build"
   },
   "include": [
-    "src/web/**/*.ts"
+    "src/web/**/*.ts",
+    "src/import/**/*.ts"
   ]
 }

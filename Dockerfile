@@ -6,6 +6,7 @@ COPY tsconfig.web.json vite.config.mts ./
 COPY frontend ./frontend
 COPY src/web ./src/web
 COPY src/domain ./src/domain
+COPY src/import ./src/import
 COPY src/models/participants.ts ./src/models/participants.ts
 RUN npm run build:web
 
