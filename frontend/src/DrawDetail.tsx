@@ -75,7 +75,7 @@ export default function DrawDetail({ group, edition, reminderOnly = false, onBus
                     {delivery.uncertain > 0 && <button className="secondary" disabled={busy || !delivery.configured} onClick={() => send('initial', true)}>Reintentar incluyendo inciertos</button>}</div>
                     {delivery.production && delivery.test && <p className="muted">Historial independiente: {delivery.production.accepted} aceptados en producción · {delivery.test.accepted} en pruebas.</p>}</>}
                 <h4>Recordatorios</h4><p>Un nuevo recordatorio envía {state.draw.participantCount} mensajes con las asignaciones originales, aunque el envío anterior se aceptara. No crea otro sorteo.</p>
-                <button disabled={busy || !delivery.configured} onClick={() => send('new')}>Enviar recordatorio a todos</button>
+                <button className={reminderOnly ? undefined : 'secondary'} disabled={busy || !delivery.configured} onClick={() => send('new')}>Enviar recordatorio a todos</button>
                 {!state.campaigns?.length && <p className="muted">Todavía no hay campañas de recordatorio.</p>}
                 {state.campaigns?.map((c, i) => <article className="campaign" key={c.id}><h4>Recordatorio {i + 1} · {c.mode === 'test' ? 'Pruebas' : 'Producción'}</h4><p>{new Date(c.createdAt).toLocaleString('es-ES', { timeZone: state.schedule?.timeZone ?? 'Europe/Madrid' })} · {state.schedule?.timeZone ?? 'Europe/Madrid'}</p><Counts counts={c} />
                     <div className="actions"><button className="secondary" disabled={busy || !delivery.configured || c.mode !== delivery.mode || c.pending + c.failed === 0} onClick={() => send(c)}>Reintentar pendientes y rechazados del recordatorio {i + 1}</button>

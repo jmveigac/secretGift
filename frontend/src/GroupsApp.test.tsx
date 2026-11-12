@@ -170,3 +170,26 @@ it('makes production recipients explicit and blocks configuration errors without
     await user.click(button('Actualizar estado')); expect(await screen.findByRole('alert')).toHaveTextContent('Configura APP_MODE');
     expect(button('Enviar 2 notificaciones')).toBeDisabled(); expect(button('Enviar recordatorio a todos')).toBeDisabled();
 });
+
+it('keeps the wizard selection when leaving is cancelled and leaves only after confirmation', async () => {
+    const user = await open();
+    await user.click(button('Nuevo sorteo'));
+    await user.click(button('Continuar'));
+    await user.click(screen.getByRole('checkbox', { name: /Bea/ }));
+    vi.mocked(window.confirm).mockReturnValueOnce(false);
+    await user.click(button('Mis grupos'));
+    expect(screen.getByRole('checkbox', { name: /Bea/ })).not.toBeChecked();
+    expect(window.confirm).toHaveBeenLastCalledWith(expect.stringContaining('Los datos de este asistente no se guardarán'));
+    await user.click(button('Mis grupos'));
+    await screen.findByRole('button', { name: /Familia.*Abrir grupo/ });
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.every(([, init]) => init?.method === 'GET')).toBe(true);
+});
+
+it('moves focus to the contact form when editing a person', async () => {
+    const user = await open();
+    await user.click(button('Participantes'));
+    await user.click(button('Editar contacto de Ana'));
+    expect(screen.getByLabelText('Nombre de persona')).toHaveFocus();
+    expect(screen.getByLabelText('Nombre de persona')).toHaveValue('Ana');
+});
