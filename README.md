@@ -11,39 +11,56 @@ Necesitas Docker Engine y Docker Compose v2 o posterior. Desde la raíz del repo
 docker compose up --build
 ```
 
-Abre **http://localhost:8787**. Crea un grupo con nombre y selecciónalo en
-«Grupo activo». En «Personas del grupo» añade o edita contactos; puedes activar
-o desactivar personas sin borrar su identidad ni su historial. Los cambios del
-directorio no modifican los contactos guardados en ediciones anteriores.
+Abre **http://localhost:8787**. La navegación separa cuatro operaciones:
 
-Crea una edición con nombre y año, marcando las personas activas que participarán.
-Puedes crear varias del mismo año con nombres distintos. «Edición activa» permite
-abrirlas después: distingue las pendientes de las sorteadas. El encabezado indica
-siempre el grupo y la edición actuales. Cambiar de selección no envía correos.
+- **Mis grupos:** abre un grupo para consultar sus sorteos, gestionar participantes
+  o cambiar su nombre. Editar o desactivar contactos conserva sus identidades y no
+  altera las copias guardadas en sorteos anteriores.
+- **Nuevo sorteo:** sigue los cinco pasos de grupo, participantes, antecedentes,
+  fecha y revisión. Puedes crear un grupo y añadir o editar contactos en el proceso.
+  Desmarcar a alguien lo excluye solo de este sorteo; desactivarlo afecta al directorio.
+- **Recordar sorteo:** selecciona un sorteo confirmado y reenvía a todos sus
+  asignaciones originales, incluidos quienes recibieron el primer correo. Cada
+  recordatorio conserva su propia campaña y sus resultados de entrega.
+- **Repetir sorteo:** parte de uno anterior para crear una edición nueva. Propone
+  sus participantes que siguen activos y permite revisar selección, título y fecha.
+  Conserva el sorteo original y aplica los antecedentes vigentes.
 
-Antes de sortear puedes incluir personas activas del grupo, añadir participantes
-nuevos, editar sus datos para esa edición e indicar una restricción manual de
-destinatario anterior.
-Retirar a alguien de esa lista no lo desactiva en el directorio. Confirma el
-sorteo: no muestra asignaciones ni envía correos. Después se bloquea la lista;
-para preparar otro sorteo, crea otra edición o confirma «Reiniciar sorteo».
-Las ediciones sorteadas conservan sus datos y muestran fecha y contadores de envío.
+Cada grupo puede celebrar varios sorteos del mismo año, con sus propios títulos y
+fechas. El historial muestra estado, notificaciones y disponibilidad de resultados.
+Los borradores existentes se pueden abrir y preparar antes de confirmarlos.
+Confirmar genera y guarda las asignaciones, **sin enviar correos**. Si no existe
+solución, se informa y no se guarda un sorteo parcial.
 
-Nadie puede regalarse a sí mismo ni repetir su último destinatario conocido del
-mismo grupo. La web busca ese antecedente por la identidad estable de cada persona,
-aunque cambie su nombre o correo o se ausente varias ediciones. Solo cuenta el
-último sorteo verificado de esa persona; si su destinatario ya no participa, no
-se añade esa exclusión. Sin antecedente verificado se usa la restricción manual
-`previousId`, si existe; el historial verificado tiene prioridad.
+En «Antecedentes» indica únicamente relaciones conocidas de sorteos externos,
+completas o parciales, entre personas seleccionadas. Deja vacío lo desconocido;
+si el destinatario anterior no participa, no hace falta una exclusión manual.
+No se inventa un sorteo histórico para completar huecos. Nadie se regala a sí mismo
+ni repite su último destinatario verificado del mismo grupo. Ese historial tiene
+prioridad sobre el antecedente manual; si el destinatario verificado está ausente,
+no se aplica otra exclusión manual en su lugar. La revisión explica qué fuente
+se utiliza sin mostrar parejas privadas. Los antecedentes manuales pertenecen a
+la nueva edición, no modifican el historial verificado del grupo.
 
-El orden es el de confirmación efectiva de los sorteos, independiente del año y
-de cuándo se creó la edición. Una edición antigua pendiente o una continuación
-ocupa su posición al sortearse. Si un grupo ya tenía varios sorteos antes de esta
-actualización, se conservan sin inventar su orden y no generan restricciones automáticas. Si tenía uno solo,
-este sí es un antecedente inequívoco de los nuevos sorteos.
-Las parejas y exclusiones históricas son privadas y no se muestran en la web.
-Si no hay solución, se informa del problema y la edición sigue sin sortear;
-no se relajan restricciones ni se guardan resultados parciales.
+Indica fecha, hora y zona horaria del evento (por defecto `Europe/Madrid`). Esa será
+también la fecha de revelación. El servidor rechaza horas ambiguas o inexistentes
+por cambios de horario; elige otra hora. Una fecha pasada deja los resultados
+disponibles al confirmar. La fecha queda fija cuando se confirma el sorteo.
+
+Hasta la revelación, las asignaciones permanecen ocultas **incluso al organizador**:
+la API también deniega su consulta. La decisión usa el reloj del servidor, no el
+navegador. Al llegar la fecha, actualiza el estado y pulsa «Ver resultados»; no
+necesitas mantener abierta la página. Los correos individuales y recordatorios
+pueden contener la asignación antes de esa fecha.
+
+Los sorteos anteriores sin fecha de revelación permanecen ocultos; no se deduce
+una fecha de su año ni se permite adelantarla mediante una edición ordinaria.
+No hay una herramienta de regularización para esos sorteos en esta versión.
+Esta protección temporal no es autenticación: después de revelar, cualquier
+persona con acceso local a la aplicación podrá consultar los resultados. Un
+administrador con acceso a la base y su clave puede leer los datos internos.
+
+«Ayuda y herramientas» contiene la vista previa de correo con datos ficticios.
 
 El acceso está limitado a localhost. Los datos se conservan en un volumen local
 al detener la aplicación. Para detenerla, pulsa Ctrl+C y ejecuta:
@@ -158,7 +175,7 @@ los envíos; no se sustituye el buzón de pruebas por direcciones reales.
 **Las instalaciones anteriores deben elegir un modo explícitamente.** Las variables
 SMTP existentes se conservan.
 
-Tras sortear, pulsa «Enviar pendientes y fallidos». La web muestra el modo y, en
+Abre el sorteo y pulsa «Enviar … notificaciones». La web muestra el modo y, en
 pruebas, el buzón efectivo; la confirmación indica el número de mensajes.
 Los resultados de pruebas y producción se conservan por separado para cada edición:
 `pending` (pendiente), `failed` (rechazo), `uncertain` (resultado incierto) y
@@ -166,6 +183,10 @@ Los resultados de pruebas y producción se conservan por separado para cada edic
 reenvían en ese modo; reenviar inciertos requiere confirmación adicional y puede
 producir duplicados. «Actualizar estado» consulta el progreso. Un error HTTP se
 muestra como alerta; completar una solicitud no significa que todos fueran aceptados.
+Los recordatorios tienen campañas independientes; reintenta la campaña fallida
+en lugar de crear otra si quieres evitar duplicar los mensajes ya aceptados.
+Las campañas de prueba solo pueden reintentarse en modo pruebas, y las de
+producción en producción.
 
 Para cambiar de modo, actualiza tu `.env` privado y recrea la aplicación con
 `docker compose up -d --build`; recarga la página y comprueba modo y contadores.
@@ -192,7 +213,7 @@ si son restricciones manuales (`manual`) o asignaciones generadas (`assignments`
 el nombre del archivo no determina su significado. Prepara las asociaciones con
 IDs existentes, altas nuevas u omisiones según el [formato del plan](docs/storage.md#importación-explícita-de-la-cli).
 
-Con Node.js 26 y `npm ci`, usa una instalación web ya inicializada en SQLite v4.
+Con Node.js 26 y `npm ci`, usa una instalación web ya inicializada en SQLite v5.
 Antes de confirmar, detén la web y [copia la base y su clave](#datos-migración-y-copias).
 Guarda el origen y el plan en una carpeta privada excluida de Git, como `.task/import`:
 

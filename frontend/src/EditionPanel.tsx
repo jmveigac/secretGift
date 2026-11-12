@@ -4,8 +4,8 @@ import ParticipantList from './ParticipantList';
 import ParticipantForm from './ParticipantForm';
 import DrawPanel from './DrawPanel';
 
-interface Props { scope?: EditionScope; people?: Person[]; groupRevision?: string; blocked?: boolean; onBusy?: (busy: boolean) => void; onChanged?: (state: StateResponse) => Promise<void> }
-export default function EditionPanel({ scope, people = [], groupRevision, blocked = false, onBusy, onChanged }: Props) {
+interface Props { requireSchedule?: boolean; scope?: EditionScope; people?: Person[]; groupRevision?: string; blocked?: boolean; onBusy?: (busy: boolean) => void; onChanged?: (state: StateResponse) => Promise<void> }
+export default function EditionPanel({ requireSchedule = false, scope, people = [], groupRevision, blocked = false, onBusy, onChanged }: Props) {
     const [state, setState] = useState<StateResponse | null>(null);
     const [editing, setEditing] = useState<Participant | null>(null);
     const [formVersion, setFormVersion] = useState(0);
@@ -68,6 +68,7 @@ export default function EditionPanel({ scope, people = [], groupRevision, blocke
         }
     }
     function draw() {
+        if (requireSchedule && !state?.schedule) { setError('Guarda una fecha de revelación antes de confirmar el sorteo.'); return; }
         if (!pending && !blocked && window.confirm('¿Realizar el sorteo con la lista y restricciones actuales? Quedará bloqueado hasta reiniciarlo. No se enviarán correos.')) {
             void mutate(api.draw);
         }
@@ -121,7 +122,7 @@ export default function EditionPanel({ scope, people = [], groupRevision, blocke
             <ParticipantForm key={formVersion} participant={editing} participants={state.participants}
                 disabled={pending || blocked || !!state.delivery?.active || locked || (!editing && state.participants.length >= state.maxParticipants)}
                 onSave={save} onCancel={clearForm} />
-            <DrawPanel state={state} pending={pending || blocked} sending={sending} onDraw={draw} onReset={reset} onSend={send} onRefresh={() => { void mutate(api.state, true); }} />
+            <DrawPanel drawBlocked={requireSchedule && !state.schedule} state={state} pending={pending || blocked} sending={sending} onDraw={draw} onReset={reset} onSend={send} onRefresh={() => { void mutate(api.state, true); }} />
         </>}
     </section>;
 }
