@@ -5,6 +5,7 @@ RUN npm ci --no-audit --no-fund
 COPY tsconfig.web.json vite.config.mts ./
 COPY frontend ./frontend
 COPY src/web ./src/web
+COPY src/mail ./src/mail
 COPY src/domain ./src/domain
 COPY src/import ./src/import
 COPY src/models/participants.ts ./src/models/participants.ts

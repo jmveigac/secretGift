@@ -10,6 +10,11 @@ export interface StateResponse {
     delivery?: {
         revision: string;
         configured: boolean;
+        mode?: 'test' | 'production';
+        testEmail?: string;
+        configurationError?: string;
+        production?: { pending: number; uncertain: number; accepted: number; failed: number };
+        test?: { pending: number; uncertain: number; accepted: number; failed: number };
         active: boolean;
         pending: number;
         uncertain: number;

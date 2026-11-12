@@ -47,7 +47,7 @@ export async function importCli(options: ImportOptions) {
     try {
         // Importing requires an existing installation: preview must not initialize or migrate it.
         const probe = new DatabaseSync(path, { readOnly: true });
-        try { if (probe.prepare('PRAGMA user_version').get()!.user_version !== 3) throw new ImportError('Arranca y actualiza primero la web: se requiere SQLite v3 existente.'); }
+        try { if (probe.prepare('PRAGMA user_version').get()!.user_version !== 4) throw new ImportError('Arranca y actualiza primero la web: se requiere SQLite v4 existente.'); }
         finally { probe.close(); }
         const db = await EncryptedDatabase.open(path, key, join(dirname(path), 'state.json'), () => {});
         try { return db.importLegacy(records, plan, options.max ?? Number(process.env.MAX_PARTICIPANTS ?? 15), options.confirm); }

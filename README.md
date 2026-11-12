@@ -131,6 +131,8 @@ solo utiliza datos ficticios, no consulta tu sorteo ni envía correos. No necesi
 Crea un archivo privado `.env` en la raíz (no lo compartas ni lo añadas a Git):
 
 ```dotenv
+APP_MODE=test
+TEST_EMAIL=pruebas@example.invalid
 FROM='"Organizador" <organizador@example.invalid>'
 HOST='smtp.example.invalid'
 PORT='587'
@@ -143,23 +145,44 @@ servidor no requiere autenticación, deja `MAILUSER` y `MAILPWD` vacíos.
 Recrea la aplicación con `docker compose up --build`. Sin SMTP configurado
 puedes preparar y confirmar el sorteo, pero no enviar correos.
 
-Tras sortear, pulsa «Enviar pendientes y fallidos» y confirma: **se enviarán
-correos reales solo para la edición seleccionada**. Cada edición tiene sus propios
-contadores y estados. «Actualizar estado» permite consultar el progreso. Los aceptados
-por SMTP no se reenvían; esta aceptación no garantiza la recepción en la bandeja
-de entrada. Los inciertos requieren confirmación adicional porque podrían
-haberse enviado ya. Reiniciar el sorteo abre una edición de trabajo sin sorteo;
-la edición anterior conserva sus participantes, asignaciones y estados en SQLite.
-Mientras hay un envío activo se bloquean las escrituras. Si otra pestaña cambia
-los datos, actualiza el grupo o el estado de la edición antes de volver a intentarlo.
+Configura `APP_MODE=test` para dirigir **todos los mensajes exclusivamente a
+`TEST_EMAIL`**, una única dirección sin nombre visible. Web y CLI aplican la misma
+redirección, también en reintentos. Cada participante genera un mensaje individual
+con su asignación original, marcado como prueba e identificado por su nombre.
+Los contactos y las asignaciones guardados no cambian. El buzón de pruebas recibirá
+asignaciones privadas: usa únicamente uno que controles.
 
-Antes de usarlo con familiares, prueba con tres participantes ficticios y buzones
-que controles: confirma el envío, revisa que cada correo contenga solo su propia
-asignación y que los tres destinatarios formen un sorteo válido. Provoca un
-rechazo en un servidor SMTP de prueba, consulta el fallo y reintenta tras corregirlo:
-los aceptados no deben reenviarse ni cambiar las asignaciones. Reinicia con
-`docker compose restart` y comprueba que se conservan los estados. Si se interrumpe
-un envío, revisa los buzones antes de decidir si reenvías los inciertos.
+`APP_MODE=production` permite enviar a los participantes originales. Si falta
+`APP_MODE`, tiene otro valor o falta un `TEST_EMAIL` válido en pruebas, se bloquean
+los envíos; no se sustituye el buzón de pruebas por direcciones reales.
+**Las instalaciones anteriores deben elegir un modo explícitamente.** Las variables
+SMTP existentes se conservan.
+
+Tras sortear, pulsa «Enviar pendientes y fallidos». La web muestra el modo y, en
+pruebas, el buzón efectivo; la confirmación indica el número de mensajes.
+Los resultados de pruebas y producción se conservan por separado para cada edición:
+`pending` (pendiente), `failed` (rechazo), `uncertain` (resultado incierto) y
+`accepted` (aceptado por SMTP, sin garantizar recepción). Los aceptados no se
+reenvían en ese modo; reenviar inciertos requiere confirmación adicional y puede
+producir duplicados. «Actualizar estado» consulta el progreso. Un error HTTP se
+muestra como alerta; completar una solicitud no significa que todos fueran aceptados.
+
+Para cambiar de modo, actualiza tu `.env` privado y recrea la aplicación con
+`docker compose up -d --build`; recarga la página y comprueba modo y contadores.
+Cambiar de modo no envía nada. Las aceptaciones de prueba no completan entregas
+reales: en producción será necesaria otra confirmación. Cambiar `TEST_EMAIL` no
+reinicia los estados de prueba ni reenvía los ya aceptados; usa otra edición si
+necesitas una nueva tanda. Mientras hay un envío activo se bloquean escrituras;
+si otra pestaña modifica la edición, actualiza antes de confirmar de nuevo.
+
+Para una prueba SMTP real posterior, con autorización del organizador: configura
+`APP_MODE=test`, un buzón propio y el SMTP del proveedor; recrea, recarga y verifica
+el destino antes de confirmar. Con cuatro participantes deben llegar cuatro
+mensajes individuales al único buzón, manteniendo producción pendiente. Revisa
+contenido, contadores y persistencia tras reiniciar. Antes de reintentar inciertos,
+comprueba el buzón. Solo después cambia explícitamente a producción si deseas
+entregar a los participantes. Esta comprobación externa no forma parte de las
+pruebas automatizadas, que utilizan SMTP simulado.
 
 ## Importar archivos de la CLI
 
@@ -169,7 +192,7 @@ si son restricciones manuales (`manual`) o asignaciones generadas (`assignments`
 el nombre del archivo no determina su significado. Prepara las asociaciones con
 IDs existentes, altas nuevas u omisiones según el [formato del plan](docs/storage.md#importación-explícita-de-la-cli).
 
-Con Node.js 26 y `npm ci`, usa una instalación web ya inicializada en SQLite v3.
+Con Node.js 26 y `npm ci`, usa una instalación web ya inicializada en SQLite v4.
 Antes de confirmar, detén la web y [copia la base y su clave](#datos-migración-y-copias).
 Guarda el origen y el plan en una carpeta privada excluida de Git, como `.task/import`:
 
@@ -219,7 +242,7 @@ JSON
 Los nombres y correos deben ser únicos. `lastGift` es el nombre de otro
 participante que recibió el regalo el año anterior, o `""` si no existe.
 
-**La CLI envía correos reales.** Ejecuta:
+**La CLI envía según `APP_MODE`, sin los contadores persistidos de la web.** Ejecuta:
 
 ```bash
 npm start

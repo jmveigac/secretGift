@@ -103,7 +103,7 @@ test('preview confirmation binds source, plan and current destination contents',
 test('one transaction rolls back group, people, edition and assignments after an injected storage failure',async()=>{
  const f=await fixture();await f.write(f.makePlan('assignments',{target:{newGroup:'Rollback destination'}}));const p=await f.preview(),before=await fs.readFile(f.options.data),key=await fs.readFile(f.options.key);
  const prepare=DatabaseSync.prototype.prepare;let failed=false;
- DatabaseSync.prototype.prepare=function(sql){const st=prepare.call(this,sql);if(sql==='INSERT INTO assignments VALUES (?, ?, ?, ?, ?)')return {run(){failed=true;throw new Error('Synthetic sensitive database detail');}};return st;};
+ DatabaseSync.prototype.prepare=function(sql){const st=prepare.call(this,sql);if(sql==='INSERT INTO assignments (group_id, edition_id, giver, private, status, test_status) VALUES (?, ?, ?, ?, ?, ?)')return {run(){failed=true;throw new Error('Synthetic sensitive database detail');}};return st;};
  try{await assert.rejects(importCli({...f.options,confirm:p.confirmation}),e=>!e.message.includes('sensitive'));}finally{DatabaseSync.prototype.prepare=prepare;}
  assert.equal(failed,true);assert.deepEqual(await fs.readFile(f.options.data),before);assert.deepEqual(await fs.readFile(f.options.key),key);
  const db=await f.open();try{assert.equal(db.listGroups().length,2);}finally{db.close();}await importCli({...f.options,confirm:p.confirmation});
@@ -136,7 +136,7 @@ test('shared storage lock blocks import during SMTP, which continues unchanged w
  try{await started;await f.write(f.makePlan('manual',{target:{newGroup:'During sending'}}));await assert.rejects(f.preview(),/ocupado/);}finally{finish();await sending;}
  assert.equal(sent,3);
 });
-test('CLI summaries, errors and public endpoints do not reveal private contacts, assignments or source paths; storage stays encrypted v3',async()=>{
+test('CLI summaries, errors and public endpoints do not reveal private contacts, assignments or source paths; storage stays encrypted v4',async()=>{
  const f=await fixture();await f.write(f.makePlan('assignments'));const preview=await run(args(f));assert.equal(preview.code,0);const p=JSON.parse(preview.stdout);assert.equal(p.imported,false);
  const imported=await run([...args(f),'--confirm',p.confirmation]);assert.equal(imported.code,0);assert.equal(JSON.parse(imported.stdout).unknownDeliveries,3);
  await fs.writeFile(f.options.source,'{"secret":"private-raw-content"');const bad=await run(args(f));assert.equal(bad.code,1);
@@ -146,12 +146,12 @@ test('CLI summaries, errors and public endpoints do not reveal private contacts,
  const store=new LocalStore(f.options.data,15,{configured:false,send:()=>assert.fail('No SMTP')},f.options.key),app=createApp(store);
  for(const url of [`/api/groups/${f.group.id}`,`/api/groups/${f.group.id}/editions/${editions[0].id}`]){const r=await app.fetch(new Request('http://localhost'+url));assert.equal(r.status,200);assert.doesNotMatch(await r.text(),/assignments|receiver|history_sequence|restrictions/);}
  const bytes=await fs.readFile(f.options.data);for(const r of f.records){assert.equal(bytes.includes(Buffer.from(r.name)),false);assert.equal(bytes.includes(Buffer.from(r.email)),false);}
- const sql=new DatabaseSync(f.options.data);try{assert.equal(sql.prepare('PRAGMA user_version').get().user_version,3);for(const row of sql.prepare('SELECT private FROM assignments').all())assert.equal(Buffer.from(row.private)[0],1);}finally{sql.close();}
+ const sql=new DatabaseSync(f.options.data);try{assert.equal(sql.prepare('PRAGMA user_version').get().user_version,4);for(const row of sql.prepare('SELECT private FROM assignments').all())assert.equal(Buffer.from(row.private)[0],1);}finally{sql.close();}
 });
 test('import refuses uninitialized or older storage without creating a key or running migrations',async()=>{
  const f=await fixture();await f.write();const missing={...f.options,data:path.join(f.root,'missing/state.sqlite'),key:path.join(f.root,'missing-key/key')};
  await assert.rejects(importCli(missing));await assert.rejects(fs.stat(missing.data),{code:'ENOENT'});await assert.rejects(fs.stat(missing.key),{code:'ENOENT'});
- const sql=new DatabaseSync(f.options.data);sql.exec('PRAGMA user_version=2');sql.close();const before=await fs.readFile(f.options.data);await assert.rejects(f.preview(),/SQLite v3/);assert.deepEqual(await fs.readFile(f.options.data),before);
+ const sql=new DatabaseSync(f.options.data);sql.exec('PRAGMA user_version=2');sql.close();const before=await fs.readFile(f.options.data);await assert.rejects(f.preview(),/SQLite v4/);assert.deepEqual(await fs.readFile(f.options.data),before);
 });
 test('legacy CLI keeps Base64 round trip and draw/mail behavior without SMTP',async()=>{
  const {readJson}=require('../build/utils/commonUtils'),{createNewSecretGiftList,createMailList}=require('../build/drawParticipants');

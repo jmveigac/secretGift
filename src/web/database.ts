@@ -101,8 +101,8 @@ export class EncryptedDatabase {
                     if (!isDeepStrictEqual(source, store.readCurrent())) throw new Error('Migration verification failed');
                     db!.exec('PRAGMA user_version=2');
                 });
-            } else if (version !== 2 && version !== 3) throw new Error('Incompatible database');
-            if (version !== 3) store.transaction(() => {
+            } else if (version !== 2 && version !== 3 && version !== 4) throw new Error('Incompatible database');
+            if (version < 3) store.transaction(() => {
                 store.checkIntegrity(); store.authenticate(); store.validateAll();
                 const before = store.snapshot();
                 // Multiple legacy draws have no verifiable relative order.
@@ -115,6 +115,14 @@ export class EncryptedDatabase {
                 store.validateAll();
                 if (!isDeepStrictEqual(before, store.snapshot())) throw new Error('Migration verification failed');
                 db!.exec('PRAGMA user_version=3');
+            });
+            if (version < 4) store.transaction(() => {
+                store.checkIntegrity(); store.authenticate(); store.validateAll();
+                const before = store.snapshot();
+                const columns = db!.prepare('PRAGMA table_info(assignments)').all();
+                if (!columns.some(c => c.name === 'test_status')) db!.exec("ALTER TABLE assignments ADD COLUMN test_status TEXT NOT NULL DEFAULT 'pending' CHECK(test_status IN ('pending','uncertain','accepted','failed'))");
+                if (!isDeepStrictEqual(before, store.snapshot())) throw new Error('Migration verification failed');
+                db!.exec('PRAGMA user_version=4');
             });
             store.transaction(() => {
                 store.checkIntegrity();
@@ -162,6 +170,7 @@ export class EncryptedDatabase {
                 PRIMARY KEY(group_id,edition_id), FOREIGN KEY(group_id,edition_id) REFERENCES editions(group_id,id));
             CREATE TABLE assignments (group_id TEXT NOT NULL, edition_id TEXT NOT NULL, giver TEXT NOT NULL, private BLOB NOT NULL,
                 status TEXT NOT NULL CHECK(status IN ('pending','uncertain','accepted','failed')),
+                test_status TEXT NOT NULL DEFAULT 'pending' CHECK(test_status IN ('pending','uncertain','accepted','failed')),
                 PRIMARY KEY(group_id,edition_id,giver),
                 FOREIGN KEY(group_id,edition_id,giver) REFERENCES participants(group_id,edition_id,id),
                 FOREIGN KEY(group_id,edition_id) REFERENCES draw(group_id,edition_id));
@@ -294,7 +303,8 @@ export class EncryptedDatabase {
             ...(draw.revision === null ? {} : { deliveryRevision: draw.revision as string }),
             ...(draw.restrictions == null ? {} : { restrictions: this.unseal(draw.restrictions, this.scope(groupId, editionId, 'restrictions')) }),
             assignments: assignments.map(row => ({ giver: row.giver as string, receiver: this.unseal(row.private, this.scope(groupId, editionId, 'assignment', row.giver as string)) })),
-            deliveries: Object.fromEntries(assignments.map(row => [row.giver, row.status]))
+            deliveries: Object.fromEntries(assignments.map(row => [row.giver, row.status])),
+            ...(assignments.some(row => row.test_status && row.test_status !== 'pending') ? { testDeliveries: Object.fromEntries(assignments.map(row => [row.giver, row.test_status ?? 'pending'])) } : {})
         } : null };
         validateState(state);
         return state;
@@ -312,7 +322,8 @@ export class EncryptedDatabase {
             completedAt: draw.completed_at as string,
             ...(draw.revision === null ? {} : { deliveryRevision: draw.revision as string }),
             assignments: assignments.map(row => ({ giver: row.giver as string, receiver: this.unseal(row.private, `assignment:${row.giver}`) })),
-            deliveries: Object.fromEntries(assignments.map(row => [row.giver, row.status]))
+            deliveries: Object.fromEntries(assignments.map(row => [row.giver, row.status])),
+            ...(assignments.some(row => row.test_status && row.test_status !== 'pending') ? { testDeliveries: Object.fromEntries(assignments.map(row => [row.giver, row.test_status ?? 'pending'])) } : {})
         } : null };
     }
     private snapshot() {
@@ -349,8 +360,8 @@ export class EncryptedDatabase {
             if (sequence != null) this.db.prepare('UPDATE draw SET history_sequence=? WHERE group_id=? AND edition_id=?').run(sequence, groupId, editionId);
             if (state.draw.restrictions) this.db.prepare('UPDATE draw SET restrictions=? WHERE group_id=? AND edition_id=?').run(
                 this.seal(state.draw.restrictions, this.scope(groupId, editionId, 'restrictions')), groupId, editionId);
-            const assignment = this.db.prepare('INSERT INTO assignments VALUES (?, ?, ?, ?, ?)');
-            for (const { giver, receiver } of state.draw.assignments) assignment.run(groupId, editionId, giver, this.seal(receiver, this.scope(groupId, editionId, 'assignment', giver)), state.draw.deliveries?.[giver] ?? 'pending');
+            const assignment = this.db.prepare('INSERT INTO assignments (group_id, edition_id, giver, private, status, test_status) VALUES (?, ?, ?, ?, ?, ?)');
+            for (const { giver, receiver } of state.draw.assignments) assignment.run(groupId, editionId, giver, this.seal(receiver, this.scope(groupId, editionId, 'assignment', giver)), state.draw.deliveries?.[giver] ?? 'pending', state.draw.testDeliveries?.[giver] ?? 'pending');
         }
     }
     /** Internal only: never serialize these IDs in HTTP responses. */
@@ -446,7 +457,7 @@ export class EncryptedDatabase {
     /** Caller must hold storageLock(path), shared with all web writers and SMTP. */
     importLegacy(input: unknown, planInput: unknown, max = 15, confirmation?: string) {
         return this.transaction(() => {
-            if (this.db.prepare('PRAGMA user_version').get()!.user_version !== 3) throw new ImportError('La importación requiere SQLite v3.');
+            if (this.db.prepare('PRAGMA user_version').get()!.user_version !== 4) throw new ImportError('La importación requiere SQLite v4.');
             if (!Number.isInteger(max) || max < 2 || max > 100) throw new ImportError('Límite de participantes incorrecto.');
             const records = parseLegacy(input), plan = parseImportPlan(planInput, records.length);
             const groups = this.listGroups(), target = plan.target;

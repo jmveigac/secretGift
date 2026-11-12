@@ -4,6 +4,8 @@ services:
     ports:
       - "127.0.0.1:8787:8787"
     environment:
+      APP_MODE: ${APP_MODE:-}
+      TEST_EMAIL: ${TEST_EMAIL:-}
       FROM: ${FROM:-}
       HOST: ${HOST:-}
       PORT: ${PORT:-}

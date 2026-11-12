@@ -194,3 +194,75 @@ it('disables sending without SMTP and while another send is active', async () =>
     expect(button('Reiniciar sorteo')).toBeDisabled();
     expect(screen.getByText('Envíos en curso.')).toBeInTheDocument();
 });
+
+it('shows test mailbox, exact retry count and explicit test confirmation', async () => {
+    const user = userEvent.setup();
+    await load(mailState({ mode: 'test', testEmail: 'test@example.invalid', pending: 1, failed: 1, accepted: 1 }));
+    expect(screen.getByText('Modo PRUEBAS')).toBeInTheDocument();
+    expect(screen.getByText(/Destinatario exclusivo: test@example.invalid/)).toBeInTheDocument();
+    fetchMock.mockResolvedValueOnce(response(mailState({ mode: 'test', testEmail: 'test@example.invalid', pending: 0, failed: 0, accepted: 3 })));
+    await user.click(button('Enviar pendientes y fallidos'));
+    expect(window.confirm).toHaveBeenLastCalledWith(expect.stringMatching(/Modo PRUEBAS.*test@example.invalid.*2 mensajes/));
+    await screen.findByText(/Solicitud de envío completada/);
+});
+
+for (const status of [409, 503]) it(`communicates HTTP ${status}, preserves counters and allows refresh`, async () => {
+    const user = userEvent.setup(); await load(mailState({ mode: 'production' }));
+    const error = status === 409 ? 'La edición ha cambiado. Actualiza su estado antes de continuar.' : 'No se pudo acceder al almacenamiento local.';
+    fetchMock.mockResolvedValueOnce(response({ error }, status));
+    await user.click(button('Enviar pendientes y fallidos'));
+    expect(await screen.findByRole('alert')).toHaveTextContent(error);
+    expect(screen.queryByText(/Solicitud de envío completada/)).not.toBeInTheDocument();
+    expect(screen.getByText('Aceptados: 0 · Pendientes: 3 · Fallidos: 0 · Inciertos: 0')).toBeInTheDocument();
+    fetchMock.mockResolvedValueOnce(response(mailState({ mode: 'production' })));
+    await user.click(button('Actualizar estado'));
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+});
+
+it('rejects a second synchronous click before showing another confirmation', async () => {
+    await load(mailState());
+    let finish!: (value: Response) => void;
+    fetchMock.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    const send = button('Enviar pendientes y fallidos');
+    fireEvent.click(send); fireEvent.click(send);
+    expect(window.confirm).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    finish(response(mailState({ accepted: 3, pending: 0 })));
+    await screen.findByText(/Solicitud de envío completada/);
+});
+
+it('communicates a guard activated during confirmation instead of silently skipping the send', async () => {
+    await load(mailState());
+    let finish!: (value: Response) => void;
+    fetchMock.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    vi.mocked(window.confirm).mockImplementationOnce(() => {
+        // Deterministically emulate an operation that started before the confirmation returned.
+        fireEvent.click(button('Actualizar estado'));
+        return true;
+    });
+    fireEvent.click(button('Enviar pendientes y fallidos'));
+    expect(await screen.findByRole('alert')).toHaveTextContent('La operación está bloqueada');
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0);
+    finish(response(mailState()));
+    await waitFor(() => expect(button('Actualizar estado')).toBeEnabled());
+});
+
+it('shows configuration errors and never asks for confirmation when sending is blocked', async () => {
+    await load(mailState({ mode: 'test', configured: false, configurationError: 'El modo pruebas requiere TEST_EMAIL con una única dirección válida.' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('El modo pruebas requiere TEST_EMAIL');
+    fireEvent.click(button('Enviar pendientes y fallidos'));
+    expect(window.confirm).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+it('distinguishes a completed send from a failure to refresh its parent group', async () => {
+    const user = userEvent.setup();
+    fetchMock.mockResolvedValueOnce(response(mailState()));
+    render(<App onChanged={async () => { throw new Error('Group refresh failed'); }} />);
+    await screen.findByText('ana@example.invalid');
+    fetchMock.mockResolvedValueOnce(response(mailState({ pending: 0, accepted: 3 })));
+    await user.click(button('Enviar pendientes y fallidos'));
+    expect(await screen.findByRole('alert')).toHaveTextContent('La operación se completó, pero no se pudo actualizar el grupo');
+    expect(screen.getByText(/Solicitud de envío completada/)).toBeInTheDocument();
+    expect(button('Enviar pendientes y fallidos')).toBeDisabled();
+});

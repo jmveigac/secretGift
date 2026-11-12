@@ -1,23 +1,8 @@
-import nodemailer, { TransportOptions } from 'nodemailer';
-import envUtils from './utils/envUtils';
+import 'dotenv/config';
 import Mail from './models/mail';
+import { smtpDelivery } from './mail/delivery';
 
-export const sendMail = async (mail: Mail) => {
-    const transporter = nodemailer.createTransport({
-        host: envUtils.HOST,
-        port: Number(envUtils.PORT),
-        secure: Number(envUtils.PORT) === 465,
-        auth: {
-            user: envUtils.MAILUSER,
-            pass: envUtils.MAILPWD
-        }
-    } as TransportOptions);
-
-    return transporter.sendMail({
-        from: envUtils.FROM,
-        to: mail.destinyMail,
-        subject: mail.subject,
-        text: mail.messageText,
-        html: mail.messageHtml
-    });
-};
+export const sendMail = async (mail: Mail) => smtpDelivery().send({
+    to: mail.destinyMail, participant: mail.participantName ?? 'Participante de la CLI',
+    subject: mail.subject, text: mail.messageText, html: mail.messageHtml,
+});
