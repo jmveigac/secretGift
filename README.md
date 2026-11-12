@@ -22,11 +22,28 @@ abrirlas después: distingue las pendientes de las sorteadas. El encabezado indi
 siempre el grupo y la edición actuales. Cambiar de selección no envía correos.
 
 Antes de sortear puedes incluir personas activas del grupo, añadir participantes
-nuevos, editar sus datos para esa edición e indicar un destinatario anterior.
+nuevos, editar sus datos para esa edición e indicar una restricción manual de
+destinatario anterior.
 Retirar a alguien de esa lista no lo desactiva en el directorio. Confirma el
 sorteo: no muestra asignaciones ni envía correos. Después se bloquea la lista;
 para preparar otro sorteo, crea otra edición o confirma «Reiniciar sorteo».
 Las ediciones sorteadas conservan sus datos y muestran fecha y contadores de envío.
+
+Nadie puede regalarse a sí mismo ni repetir su último destinatario conocido del
+mismo grupo. La web busca ese antecedente por la identidad estable de cada persona,
+aunque cambie su nombre o correo o se ausente varias ediciones. Solo cuenta el
+último sorteo verificado de esa persona; si su destinatario ya no participa, no
+se añade esa exclusión. Sin antecedente verificado se usa la restricción manual
+`previousId`, si existe; el historial verificado tiene prioridad.
+
+El orden es el de confirmación efectiva de los sorteos, independiente del año y
+de cuándo se creó la edición. Una edición antigua pendiente o una continuación
+ocupa su posición al sortearse. Si un grupo ya tenía varios sorteos antes de esta
+actualización, se conservan sin inventar su orden y no generan restricciones automáticas. Si tenía uno solo,
+este sí es un antecedente inequívoco de los nuevos sorteos.
+Las parejas y exclusiones históricas son privadas y no se muestran en la web.
+Si no hay solución, se informa del problema y la edición sigue sin sortear;
+no se relajan restricciones ni se guardan resultados parciales.
 
 El acceso está limitado a localhost. Los datos se conservan en un volumen local
 al detener la aplicación. Para detenerla, pulsa Ctrl+C y ejecuta:

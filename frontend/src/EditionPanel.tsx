@@ -55,7 +55,7 @@ export default function EditionPanel({ scope, people = [], groupRevision, blocke
         return mutate(() => api.save(input, id));
     }
     function remove(participant: Participant) {
-        if (!pending && !blocked && window.confirm('¿Eliminar a este participante? Se retirarán sus referencias del año anterior.')) {
+        if (!pending && !blocked && window.confirm('¿Eliminar a este participante? Se retirarán sus restricciones manuales.')) {
             void mutate(() => api.remove(participant.id));
         }
     }
