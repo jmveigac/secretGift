@@ -41,6 +41,7 @@ export const createNewSecretGiftList = (participants: Participants[]): Participa
 
 export const createMailList = (participants: Participants[]): Mail[] => {
     return participants.map(participant => ({
+        participantName: participant.name,
         destinyMail: participant.email,
         subject: `${envUtils.SUBJECT} ${new Date().getFullYear()}`,
         messageText: `Este año tu amigo invisible es: ${participant.lastGift} No olvides los regalos :D`,

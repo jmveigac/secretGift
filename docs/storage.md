@@ -1,4 +1,4 @@
-# Modelo SQLite v3
+# Modelo SQLite v4
 
 `PRAGMA user_version` versiona el esquema; `State.version=1` sigue describiendo
 el estado de una edición; el contrato HTTP anterior sigue siendo compatible. Los tipos y su
@@ -13,7 +13,7 @@ validación residen en `src/domain/editions.ts`.
 | `editions` | UUID estable, grupo, nombre cifrado y año. El año y el nombre no son claves únicas. |
 | `participants` | `(group_id, edition_id, id)`: participación de una persona, posición y copia cifrada de nombre, correo y exclusión anterior. |
 | `draw` | `(group_id, edition_id)`: fecha y revisión de envío de una edición sorteada. |
-| `assignments` | `(group_id, edition_id, giver)`: destinatario cifrado y estado SMTP individual. |
+| `assignments` | `(group_id, edition_id, giver)`: destinatario cifrado y estados SMTP independientes de producción y pruebas. |
 | `compatibility` | Fila única con el grupo inicial y la edición de trabajo de la API actual. |
 | `metadata` | Verificador autenticado de la clave. |
 
@@ -68,7 +68,7 @@ si el volumen deja de ser pequeño y local.
 
 ## API de grupos y ediciones
 
-El esquema pasa a v3; los sobres cifrados existentes no cambian. No hay selección global
+El esquema actual es v4; los sobres cifrados existentes no cambian. No hay selección global
 de grupo o edición en el servidor: cada operación nueva lleva ambos IDs en la URL.
 
 | Ruta | Operaciones |
@@ -166,7 +166,7 @@ asignaciones, la instantánea de restricciones ni destinatarios históricos.
 `npm run import:cli -- --source ARCHIVO --plan PLAN [--data SQLITE] [--key CLAVE]`
 valida y devuelve solo contadores y un código HMAC. `--confirm CODIGO` confirma
 exactamente esa vista previa. `--help` muestra las opciones. No importa al arrancar
-la web. Requiere una instalación v3 existente: no inicializa ni migra bases.
+la web. Requiere una instalación v4 existente: no inicializa ni migra bases.
 Las rutas y `MAX_PARTICIPANTS` usan los valores habituales de la web; el límite
 por defecto es 15 participantes seleccionados (máximo configurable 100).
 
@@ -289,7 +289,7 @@ mantiene el bloqueo. El repositorio valida y publica personas, grupo, edición,
 asignaciones, secuencia y estados en una transacción `BEGIN IMMEDIATE`. Compara
 el estado releído con el preparado y comprueba claves foráneas antes de confirmar.
 La vista previa usa una transacción de lectura y no crea entidades. No cambia el
-esquema v3 ni la clave. Los errores pueden identificar índices de registro, pero no su contenido, contactos, parejas, rutas
+esquema v4 ni la clave. Los errores pueden identificar índices de registro, pero no su contenido, contactos, parejas, rutas
 privadas ni detalles de SQLite; los resúmenes solo contienen contadores, modo y
 el código de confirmación. Los endpoints públicos mantienen sus campos actuales.
 
@@ -318,3 +318,21 @@ se rechaza mediante los conflictos descritos. Para revertir una importación
 confirmada, detén la web y restaura **ambos directorios completos** de la copia
 previa, según README. Esto también revierte cualquier cambio posterior al respaldo.
 No se eliminan los archivos de origen ni se regeneran claves para recuperar datos.
+
+## Estados de pruebas SMTP (v4)
+
+La migración v3→v4 añade `assignments.test_status`, con los mismos cuatro estados
+que `status` y valor inicial `pending`, dentro de una transacción versionada.
+`status` conserva exactamente el historial de producción. No se reinterpretan
+aceptaciones existentes, no cambian contactos, asignaciones, fechas ni claves.
+Se autentica y valida antes y después del cambio; un fallo revierte la migración.
+Las versiones anteriores se actualizan primero mediante sus migraciones existentes.
+Haz una copia de la base y su clave antes de actualizar; para volver a una versión
+anterior restaura su copia, no abras SQLite v4 con el programa antiguo.
+
+La lectura interna usa `deliveries` para producción y `testDeliveries` para pruebas.
+Ambas se guardan juntas y sobreviven a cambios de modo y reinicios. El envío solo
+actualiza el canal activo y comparte el bloqueo y revisión de la edición. Antes de
+SMTP persiste `uncertain` en ese canal. La revisión pública de envío incorpora una
+sesión nueva por arranque para rechazar confirmaciones de una configuración anterior.
+No hay envío automático ni reinicio de estados al cambiar modo o buzón de pruebas.

@@ -31,7 +31,7 @@ test('requires confirmed draw, explicit confirmation, current revision and priva
  assert.equal((await call(await payload(),{Origin:'http://evil.invalid'})).status,403);
  assert.equal((await call({...await payload(),drawId:'old'})).status,409);
  for(const env of [{},{HOST:'smtp.example.invalid',FROM:'a@example.invalid',PORT:'bad'},{HOST:'host',FROM:'a@example.invalid',PORT:'25',MAILUSER:'user'},{HOST:'host',FROM:'invalid',PORT:'25'}]) assert.equal(smtpSender(env).configured,false);
- assert.equal(smtpSender({HOST:'host',FROM:'a@example.invalid',PORT:'25'}).configured,true);
+ assert.equal(smtpSender({APP_MODE:'production',HOST:'host',FROM:'a@example.invalid',PORT:'25'}).configured,true);
 });
 test('uses persisted assignments, partial failure retries skip accepted and duplicate HTTP requests cannot retry failures',async()=>{
  const sent=[];let fail=true;
@@ -105,7 +105,7 @@ test('web SMTP transport sends only the individual assignment and classifies def
  let options,message,closed=0,mode='accepted';
  nodemailer.createTransport=o=>{options=o;return {sendMail:async m=>{message=m;if(mode==='reject')throw {responseCode:550,message:'private error'};if(mode==='timeout')throw new Error('private timeout');return {accepted:[m.to]};},close:()=>closed++};};
  try{
-  const sender=smtpSender({HOST:'smtp.example.invalid',FROM:'"Organizador" <sender@example.invalid>',PORT:'465',MAILUSER:'synthetic',MAILPWD:'synthetic'});
+  const sender=smtpSender({APP_MODE:'production',HOST:'smtp.example.invalid',FROM:'"Organizador" <sender@example.invalid>',PORT:'465',MAILUSER:'synthetic',MAILPWD:'synthetic'});
   const input={to:'ana@example.invalid',name:'Ana',receiver:'Bea'};
   assert.equal(sender.configured,true);assert.equal(await sender.send(input),'accepted');
   assert.equal(options.secure,true);assert.equal(message.to,input.to);assert.match(message.text,/Hola Ana/);assert.match(message.text,/regalar a Bea/);assert.equal(message.cc,undefined);assert.equal(message.bcc,undefined);

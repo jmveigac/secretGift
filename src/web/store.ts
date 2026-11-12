@@ -58,10 +58,18 @@ export class LocalStore {
         return task;
     }
     private publicView(state: State): StateResponse {
-        const counts = { pending: 0, uncertain: 0, accepted: 0, failed: 0 };
-        if (state.draw) for (const p of state.participants) counts[state.draw.deliveries?.[p.id] ?? 'pending']++;
-        return { delivery: { revision: state.draw?.deliveryRevision ?? state.draw?.completedAt ?? '', configured: this.mail.configured, active: activePaths.has(this.path), ...counts }, participants: state.participants.map(({ id, name, email, previousId }) => ({ id, name, email, previousId })), maxParticipants: this.max, draw: state.draw ? { completed: true, participantCount: state.participants.length, completedAt: state.draw.completedAt } : { completed: false, participantCount: state.participants.length } };
+        const count = (deliveries?: Record<string, Delivery>) => {
+            const result = { pending: 0, uncertain: 0, accepted: 0, failed: 0 };
+            if (state.draw) for (const p of state.participants) result[deliveries?.[p.id] ?? 'pending']++;
+            return result;
+        };
+        const production = count(state.draw?.deliveries), test = count(state.draw?.testDeliveries);
+        const mode = this.mail.mode ?? 'production';
+        const revision = (state.draw?.deliveryRevision ?? state.draw?.completedAt ?? '') + (this.mail.session ? `:${this.mail.session}` : '');
+        return { delivery: { revision, mode: this.mail.mode, testEmail: this.mail.testEmail, configurationError: this.mail.configurationError,
+            production, test, configured: this.mail.configured, active: activePaths.has(this.path), ...(mode === 'test' ? test : production) }, participants: state.participants.map(({ id, name, email, previousId }) => ({ id, name, email, previousId })), maxParticipants: this.max, draw: state.draw ? { completed: true, participantCount: state.participants.length, completedAt: state.draw.completedAt } : { completed: false, participantCount: state.participants.length } };
     }
+
     private requireScope(db: EncryptedDatabase, scope: EditionScope) {
         if (!db.listGroups().some(g => g.id === scope.groupId)
             || !db.listEditions(scope.groupId).some(e => e.id === scope.editionId)) throw new AppError(404, 'Edición no encontrada en este grupo.');
@@ -153,22 +161,23 @@ export class LocalStore {
             const draw = state.draw;
             if (!draw) throw new AppError(409, 'Confirma el sorteo antes de enviar.');
             if (body.drawId !== draw.completedAt) throw new AppError(409, 'El sorteo ha cambiado. Recarga antes de enviar.');
-            if (!this.mail.configured) throw new AppError(409, 'SMTP no está configurado. Configura las variables privadas y reinicia la aplicación.');
-            if (body.revision !== (draw.deliveryRevision ?? draw.completedAt)) throw new AppError(409, 'El estado de envío ha cambiado. Recarga antes de reintentar.');
+            if (!this.mail.configured) throw new AppError(409, this.mail.configurationError ?? 'SMTP no está configurado. Configura las variables privadas y reinicia la aplicación.');
+            if (body.revision !== this.publicView(state).delivery!.revision) throw new AppError(409, 'El estado de envío ha cambiado. Recarga antes de reintentar.');
             draw.deliveryRevision = randomUUID();
-            draw.deliveries ??= Object.fromEntries(state.participants.map(p => [p.id, 'pending' as Delivery]));
+            const lane = this.mail.mode === 'test' ? 'testDeliveries' : 'deliveries';
+            const deliveries = draw[lane] ??= Object.fromEntries(state.participants.map(p => [p.id, 'pending' as Delivery]));
             await this.write(state, scope);
             for (const assignment of draw.assignments) {
-                const previous = draw.deliveries[assignment.giver];
+                const previous = deliveries[assignment.giver];
                 if (previous === 'accepted' || previous === 'uncertain' && body.retryUncertain !== true) continue;
                 // Persist before SMTP. Any interruption leaves an explicit uncertain result.
-                draw.deliveries[assignment.giver] = 'uncertain';
+                deliveries[assignment.giver] = 'uncertain';
                 await this.write(state, scope);
                 const giver = state.participants.find(p => p.id === assignment.giver)!;
                 const receiver = state.participants.find(p => p.id === assignment.receiver)!;
                 let outcome: Delivery = 'uncertain';
                 try { outcome = await this.mail.send({ to: giver.email, name: giver.name, receiver: receiver.name }); } catch { /* never expose SMTP errors */ }
-                draw.deliveries[assignment.giver] = outcome;
+                deliveries[assignment.giver] = outcome;
                 await this.write(state, scope);
             }
             const result = await this.view(state, scope);

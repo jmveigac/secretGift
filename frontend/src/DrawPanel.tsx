@@ -22,10 +22,14 @@ export default function DrawPanel({ state, pending, sending, onDraw, onReset, on
         <button className="secondary" disabled={busy || !state.draw.completed} onClick={onReset}>Reiniciar sorteo</button>
         {state.draw.completed && delivery && <div>
             <h3>Envío de asignaciones</h3>
+            {delivery.mode === 'test' ? <p><strong>Modo PRUEBAS</strong> · Destinatario exclusivo: {delivery.testEmail ?? 'sin configurar'}. Los resultados siguientes son de prueba.</p>
+                : delivery.mode === 'production' ? <p><strong>Modo PRODUCCIÓN</strong> · Destinatarios: los participantes de esta edición.</p> : <p>Modo de envío sin configurar.</p>}
+            {delivery.production && delivery.test && <p>Historial independiente: producción {delivery.production.accepted} aceptados; pruebas {delivery.test.accepted} aceptados.</p>}
+            <p>Mensajes pendientes o fallidos para enviar: {delivery.pending + delivery.failed}.</p>
             <p>{delivery.active || sending ? 'Envíos en curso.' : delivery.accepted === state.draw.participantCount ? 'Envíos completados: aceptados por SMTP.' : delivery.failed ? 'Hay envíos fallidos.' : delivery.uncertain ? 'Hay envíos con resultado incierto.' : 'Envíos pendientes.'}</p>
             <p>Aceptados: {delivery.accepted} · Pendientes: {delivery.pending} · Fallidos: {delivery.failed} · Inciertos: {delivery.uncertain}</p>
             <p>La aceptación por SMTP no confirma la llegada a la bandeja de entrada.</p>
-            {!delivery.configured && <p role="alert">SMTP no está configurado. Configura las variables privadas y reinicia la aplicación.</p>}
+            {!delivery.configured && <p role="alert">{delivery.configurationError ?? 'SMTP no está configurado. Configura las variables privadas y reinicia la aplicación.'}</p>}
             <button disabled={busy || !delivery.configured || delivery.pending + delivery.failed === 0} onClick={() => onSend()}>Enviar pendientes y fallidos</button>
             {delivery.uncertain > 0 && <>
                 <p>Un envío incierto puede haber sido aceptado. Reenviarlo puede producir un duplicado.</p>

@@ -10,3 +10,5 @@ build/
 .env.*
 data/
 keys/
+
+!.env.example
