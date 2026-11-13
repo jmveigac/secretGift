@@ -9,6 +9,13 @@ const mailbox = (value: string | undefined): value is string => !!value && value
     && /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+$/.test(value);
 const escapeHtml = (value: string) => value.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 
+function testHtml(html: string, notice: string): string {
+    const banner = `<p>${escapeHtml(notice)}</p>`;
+    // Web mail is a complete document; the legacy CLI supplies an HTML fragment.
+    if (/<body\b[^>]*>/i.test(html)) return html.replace(/<body\b[^>]*>/i, opening => opening + banner);
+    return `<!doctype html><html><head><meta charset="utf-8"></head><body>${banner}${html}</body></html>`;
+}
+
 /** All SMTP paths (web and CLI) must use this recipient boundary. */
 export function smtpDelivery(environment = process.env) {
     const env = { ...environment };
@@ -42,7 +49,7 @@ export function smtpDelivery(environment = process.env) {
                     from, to, envelope: { from: envelopeFrom, to: [to] },
                     subject: mode === 'test' ? `[PRUEBA] ${message.subject}` : message.subject,
                     text: mode === 'test' ? `${notice}\n\n${message.text}` : message.text,
-                    html: mode === 'test' ? `<p>${escapeHtml(notice)}</p>${message.html}` : message.html,
+                    html: mode === 'test' ? testHtml(message.html, notice) : message.html,
                     disableFileAccess: true, disableUrlAccess: true,
                 });
             } finally { transport.close(); }
