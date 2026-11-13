@@ -127,7 +127,7 @@ test('scoped new identities roll back with their participation and concurrent st
  const results=await Promise.all(['Bea','Cora'].map(name=>f.write(g,id,s,'/participants',{name,email:name.toLowerCase()+'@example.invalid',previousId:null})));
  assert.deepEqual(results.map(r=>r.status).sort(),[201,409]);
  assert.equal((await f.state(g,id)).participants.length,2);assert.equal((await f.get(g.group.id)).people.length,2);
- sql=new DatabaseSync(f.file);try{assert.equal(sql.prepare('PRAGMA user_version').get().user_version,4);}finally{sql.close();}
+ sql=new DatabaseSync(f.file);try{assert.equal(sql.prepare('PRAGMA user_version').get().user_version,5);}finally{sql.close();}
 });
 test('a scoped persistence failure after SMTP acceptance retains uncertainty and releases the lock',async()=>{
  const original=EncryptedDatabase.prototype.writeEdition;

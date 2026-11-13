@@ -1,3 +1,4 @@
+import type { Schedule } from './schedule';
 export interface Participant {
     id: string;
     name: string;
@@ -8,7 +9,7 @@ export interface Participant {
 export type Delivery = 'pending' | 'uncertain' | 'accepted' | 'failed';
 export interface Group { id: string; name: string }
 export interface Person { id: string; name: string; email: string; active: boolean }
-export interface Edition { id: string; groupId: string; name: string; year: number }
+export interface Edition { id: string; groupId: string; name: string; year: number; schedule?: Schedule }
 export interface State { version: 1; participants: Participant[]; draw: null | { completedAt: string; assignments: { giver: string; receiver: string }[]; restrictions?: Record<string, string | null>; deliveryRevision?: string; deliveries?: Record<string, Delivery>; testDeliveries?: Record<string, Delivery> } }
 
 export function validateState(state: State, max = 100) {

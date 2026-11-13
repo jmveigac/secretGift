@@ -81,7 +81,7 @@ test('HTTP adapter accepts bodies, limits sizes and protects private routes', as
  const post=(route,body,extra={})=>fetch(base+route,{method:'POST',headers:{'Content-Type':'application/json',...extra},body});
  assert.equal((await post('/api/participants',JSON.stringify(person('A')))).status,201);
  assert.equal((await post('/api/participants','{')).status,400);
- assert.equal((await post('/api/participants','x'.repeat(9000))).status,413);
+ assert.equal((await post('/api/participants','x'.repeat(20000))).status,413);
  assert.equal((await post('/api/participants','{}',{'Content-Type':'text/plain'})).status,415);
  assert.equal((await post('/api/draw','{"confirm":true}',{Origin:'http://evil.invalid'})).status,403);
  for(const route of ['/api/mail','/.env','/data/state.json','/participants.json','/src/web/store.ts','/../state.json']) assert.equal((await fetch(base+route)).status,404);
@@ -108,7 +108,7 @@ test('HTTP adapter accepts bodies, limits sizes and protects private routes', as
 
 test('direct Request API also enforces streaming body limits and impossible restrictions', async t => {
  const {app,call} = await setup(t);
- const response=await app.fetch(new Request('http://localhost/api/participants',{method:'POST',headers:{'Content-Type':'application/json'},body:'x'.repeat(9000)}));
+ const response=await app.fetch(new Request('http://localhost/api/participants',{method:'POST',headers:{'Content-Type':'application/json'},body:'x'.repeat(20000)}));
  assert.equal(response.status,413);
  let r=await call('/api/participants','POST',person('A'));const a=(await r.json()).participants[0];
  r=await call('/api/participants','POST',{...person('B'),previousId:a.id}); const b=(await r.json()).participants[1];

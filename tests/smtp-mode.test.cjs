@@ -93,7 +93,7 @@ test('v3 to v4 migration preserves original key, assignments and historical prod
  try{await assert.rejects(f.open(),/Synthetic migration failure/);}finally{DatabaseSync.prototype.exec=exec;}
  assert.deepEqual(await fs.readFile(f.file),bytes);assert.deepEqual(await fs.readFile(f.key),key);
  db=await f.open();try{assert.deepEqual(db.read(),before);}finally{db.close();}
- db=new DatabaseSync(f.file);try{assert.equal(db.prepare('PRAGMA user_version').get().user_version,4);assert.equal(db.prepare("SELECT COUNT(*) n FROM assignments WHERE test_status='pending' AND status='accepted'").get().n,4);}finally{db.close();}
+ db=new DatabaseSync(f.file);try{assert.equal(db.prepare('PRAGMA user_version').get().user_version,5);assert.equal(db.prepare("SELECT COUNT(*) n FROM assignments WHERE test_status='pending' AND status='accepted'").get().n,4);}finally{db.close();}
 });
 test('legacy CLI uses the same recipient boundary, including resends, without exposing transport errors',async()=>{
  const previous={...process.env};

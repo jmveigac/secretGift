@@ -1,4 +1,4 @@
-# Modelo SQLite v4
+# Modelo SQLite v5
 
 `PRAGMA user_version` versiona el esquema; `State.version=1` sigue describiendo
 el estado de una edición; el contrato HTTP anterior sigue siendo compatible. Los tipos y su
@@ -68,7 +68,7 @@ si el volumen deja de ser pequeño y local.
 
 ## API de grupos y ediciones
 
-El esquema actual es v4; los sobres cifrados existentes no cambian. No hay selección global
+El esquema actual es v5; los sobres cifrados existentes no cambian. No hay selección global
 de grupo o edición en el servidor: cada operación nueva lleva ambos IDs en la URL.
 
 | Ruta | Operaciones |
@@ -166,7 +166,7 @@ asignaciones, la instantánea de restricciones ni destinatarios históricos.
 `npm run import:cli -- --source ARCHIVO --plan PLAN [--data SQLITE] [--key CLAVE]`
 valida y devuelve solo contadores y un código HMAC. `--confirm CODIGO` confirma
 exactamente esa vista previa. `--help` muestra las opciones. No importa al arrancar
-la web. Requiere una instalación v4 existente: no inicializa ni migra bases.
+la web. Requiere una instalación v5 existente: no inicializa ni migra bases.
 Las rutas y `MAX_PARTICIPANTS` usan los valores habituales de la web; el límite
 por defecto es 15 participantes seleccionados (máximo configurable 100).
 
@@ -289,7 +289,7 @@ mantiene el bloqueo. El repositorio valida y publica personas, grupo, edición,
 asignaciones, secuencia y estados en una transacción `BEGIN IMMEDIATE`. Compara
 el estado releído con el preparado y comprueba claves foráneas antes de confirmar.
 La vista previa usa una transacción de lectura y no crea entidades. No cambia el
-esquema v4 ni la clave. Los errores pueden identificar índices de registro, pero no su contenido, contactos, parejas, rutas
+esquema v5 ni la clave. Los errores pueden identificar índices de registro, pero no su contenido, contactos, parejas, rutas
 privadas ni detalles de SQLite; los resúmenes solo contienen contadores, modo y
 el código de confirmación. Los endpoints públicos mantienen sus campos actuales.
 
@@ -336,3 +336,86 @@ actualiza el canal activo y comparte el bloqueo y revisión de la edición. Ante
 SMTP persiste `uncertain` en ese canal. La revisión pública de envío incorpora una
 sesión nueva por arranque para rechazar confirmaciones de una configuración anterior.
 No hay envío automático ni reinicio de estados al cambiar modo o buzón de pruebas.
+
+
+## Fechas, resultados y recordatorios (v5)
+
+La migración v4→v5 añade `editions.schedule` (BLOB AES-GCM nullable con AAD de
+la edición), `mail_campaigns` y `campaign_deliveries`. Todo ocurre en una
+transacción: autentica y valida antes/después, comprueba las instantáneas y solo
+entonces fija `user_version=5`. Un fallo revierte el DDL y la versión. No reescribe
+los sobres existentes ni cambia claves, identidades, asignaciones, secuencias o
+estados SMTP originales. Los pasos v1→v4 siguen disponibles. Para volver a un
+programa anterior restaura una copia compatible de su base y clave.
+
+`Schedule` guarda la hora local, zona IANA, `eventAt` UTC y `revealAt` UTC como
+conceptos separados; la creación actual fija ambos instantes iguales. El resolutor
+usa `Intl` del servidor para buscar los instantes compatibles con la hora local.
+Rechaza fechas inválidas, huecos y solapamientos de horario en vez de escoger un
+instante implícito. La configuración HTTP solo acepta hora local y zona: no permite
+imponer un `revealAt` distinto. La actualización de metadatos comprueba que no hay
+sorteo confirmado; una vez confirmado no existe escritura ordinaria de su fecha.
+Las revisiones optimistas incluyen los metadatos de la edición.
+
+Las ediciones migradas, importadas o creadas por la API antigua sin fecha conservan
+`schedule=NULL`. Sus resultados nunca se revelan automáticamente. Una futura
+regularización exigiría una operación de mantenimiento explícita, con revisión,
+registro de la decisión y una fecha real autorizada antes de permitir consultas;
+no se puede inferir del año ni reutilizar la edición ordinaria. Esa operación no
+está implementada. La API heredada conserva el envío, sin habilitar resultados
+para esas ediciones; la CLI mantiene sus archivos y operación fuera de la API web.
+
+Las respuestas generales solo contienen disponibilidad y fecha, nunca parejas ni
+exclusiones verificadas. `LocalStore.results` comprueba confirmación, ámbito y
+fecha persistida usando su reloj inyectable; devuelve las parejas solo cuando
+`now >= revealAt`. Los resultados incluyen IDs y nombres de las instantáneas, sin
+correos. También se comprueba en HEAD y todas las respuestas llevan `no-store`.
+Los correos individuales mantienen el acceso interno necesario antes de la fecha.
+Esto limita las consultas web, no protege frente a un administrador con acceso a
+la clave, al proceso o al reloj del sistema.
+
+El asistente reutiliza `previousId` por persona en la nueva instantánea. No crea
+historial artificial. La comprobación reutiliza `previousRecipients` y
+`effectiveRestrictions`; para los antecedentes verificados solo publica su fuente, nunca el ID ni la presencia del destinatario verificado en la selección. El
+alta y confirmación guiadas se ejecutan juntas en la transacción de `createEdition`;
+se reutilizan el algoritmo, confirmación histórica y asignación de secuencia. Si
+no hay solución, se revierte también la nueva edición. La repetición pasa por
+`forkEdition` con los datos revisados, conservando su comportamiento heredado.
+
+### Endpoints
+
+Todos mantienen la validación de autoridad local, origen, JSON y límite de cuerpo.
+El límite pasa a 16 KiB para admitir hasta 100 participantes y antecedentes en
+una petición; el máximo funcional sigue siendo `MAX_PARTICIPANTS`.
+
+- `POST /api/groups/:group/preview`: `expectedRevision`, `personIds`, `previousIds`
+  opcional y `schedule` opcional (`localDateTime`, `timeZone`). Devuelve viabilidad,
+  fuente de restricciones y fecha normalizada, sin generar ni persistir un sorteo.
+- `POST /api/groups/:group/editions`: conserva el contrato anterior; admite además
+  `previousIds`, `schedule`, `confirmDraw:true` y `referenceEditionId` opcional.
+  La confirmación guiada exige fecha, no envía correo y devuelve el grupo actualizado.
+- `PUT /api/groups/:group/editions/:edition`: configura título y fecha de un borrador
+  con `expectedRevision`. Rechaza sorteos confirmados (409).
+- `GET|HEAD /api/groups/:group/editions/:edition/results`: 409 si no se confirmó;
+  403 antes de la fecha o sin ella; 200 con parejas a partir del instante persistido.
+- `POST /api/groups/:group/editions/:edition/reminders`: crea y envía una nueva
+  campaña a todos. Exige `confirm:true`, `drawId`, `expectedRevision` y la revisión
+  de entrega inicial. Esta revisión se consume al crear la campaña para rechazar
+  duplicados, incluso tras reinicio. No crea otra edición ni cambia su fecha.
+- `POST /api/groups/:group/editions/:edition/reminders/:campaign/send`: reintenta
+  pendientes/rechazados; requiere revisión de campaña, revisión de edición y la
+  misma confirmación. `retryUncertain:true` autoriza incluir inciertos. Aceptados
+  se omiten. Rechaza campañas de otro ámbito (404) o modo (409).
+
+Cada campaña guarda ID, ámbito, fecha, modo y revisión; sus estados individuales
+se almacenan por ID de persona sin duplicar direcciones o asignaciones. Referencia
+las instantáneas originales. Sus estados no reemplazan `status` ni `test_status`
+y permanecen al actualizar esos estados o crear otra campaña. El estado público
+de edición añade resúmenes `campaigns`, sin información de parejas.
+
+El transporte común sigue aplicando la redirección de pruebas a cabecera y sobre.
+Campañas y envíos originales comparten el bloqueo de almacenamiento y la revisión
+de sesión SMTP. Cada intento persiste `uncertain` antes de contactar el transporte.
+Un fallo posterior a la aceptación conserva incertidumbre; reiniciar no reenvía.
+El reintento consume su propia revisión y no reenvía aceptados. Crear otra campaña
+sí envía a todos: es una decisión nueva con confirmación explícita.
