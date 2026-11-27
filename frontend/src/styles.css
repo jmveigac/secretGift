@@ -125,8 +125,7 @@ section { min-width:0; margin-bottom:1.5rem; }
   content:""; position:absolute; width:min(130%,30rem); aspect-ratio:1; border-radius:50%;
   background:repeating-radial-gradient(circle,transparent 0 2.4rem,#e4f4c51d 2.45rem 2.5rem);
 }
-.hero-mark { position:relative; width:min(60%,10rem); color:var(--pear); }
-.hero-art img { position:absolute; width:min(100%,22rem); max-height:125%; object-fit:contain; }
+.hero-art img { position:absolute; width:min(100%,19rem); height:auto; max-height:125%; object-fit:contain; }
 .group-grid,.draw-grid,.people-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:1rem; }
 .group-card,.draw-card,.campaign,.choice-card,.reveal-panel,.review-grid,.contact-form,.notification-panel {
   min-width:0; padding:clamp(.85rem,2vw,1.35rem); background:var(--surface);
@@ -272,10 +271,6 @@ td,th { border-bottom:1px solid var(--line); }
 .group-event-title .countdown { align-items:center; justify-content:center; flex-direction:column; gap:.03rem; min-width:5.65rem; text-align:center; }
 .group-event-title .countdown strong { font-size:1.4rem; }
 .group-event-title .countdown span { max-width:6rem; }
-.hero-art canvas { position:absolute; width:min(100%,19rem); max-height:125%; object-fit:contain; }
-@media (max-width:680px) {
-  .hero-art canvas { width:135%; max-height:105%; }
-}
 .group-event > .event-link { border-color:transparent; padding-inline:.15rem .55rem; color:var(--accent); }
 .event-link span { margin-inline-start:.25rem; }
 .group-card > .actions .secondary:not(:last-child) { border-color:transparent; padding-inline:.35rem; }

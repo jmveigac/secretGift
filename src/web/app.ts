@@ -10,12 +10,17 @@ export const headers = {
     'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
     'Referrer-Policy': 'no-referrer'
 };
+const imageAssets = new Map([
+    ['/assets/favicon.svg', 'image/svg+xml'],
+    ['/assets/gift-illustration.webp', 'image/webp'],
+]);
 export const json = (value: unknown, status = 200, extra = {}) => new Response(JSON.stringify(value), { status, headers: { ...headers, 'Content-Type': 'application/json; charset=utf-8', ...extra } });
 export const createApp = (store = new LocalStore()) => ({
     async fetch(request: Request): Promise<Response> {
         try {
             const url = new URL(request.url), path = url.pathname, method = request.method;
             const asset = /^\/assets\/[A-Za-z0-9_-]+\.(js|css)$/.exec(path);
+            const imageType = imageAssets.get(path);
             const participant = /^\/api\/participants\/([\da-f-]{36})$/.exec(path);
             const preview = /^\/api\/groups\/([\da-f-]{36})\/preview$/.exec(path);
             const campaign = /^\/api\/groups\/([\da-f-]{36})\/editions\/([\da-f-]{36})\/reminders(?:\/([\da-f-]{36})\/send)?$/.exec(path);
@@ -35,7 +40,7 @@ export const createApp = (store = new LocalStore()) => ({
             else if (people) methods = people[2] ? ['PUT'] : ['POST'];
             else if (editions) methods = ['POST'];
             else if (scoped) methods = resource === 'participants' ? memberId ? ['PUT', 'DELETE'] : ['POST'] : drawResource ? ['POST'] : ['GET', 'HEAD', 'PUT'];
-            else if (path === '/' || asset || path === '/mail-preview' || path === '/api/health' || path === '/api/state') methods = ['GET', 'HEAD'];
+            else if (path === '/' || asset || imageType || path === '/mail-preview' || path === '/api/health' || path === '/api/state') methods = ['GET', 'HEAD'];
             else if (path === '/api/participants' || path === '/api/draw' || path === '/api/draw/reset' || path === '/api/draw/send') methods = ['POST'];
             else if (participant) methods = ['PUT', 'DELETE'];
             if (!methods) return json({ error: 'Ruta no encontrada.' }, 404);
@@ -49,15 +54,20 @@ export const createApp = (store = new LocalStore()) => ({
                         'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'; sandbox"
                     } });
                 }
-                else if (path === '/' || asset) {
-                    let content: string;
-                    try { content = await fs.readFile(resolve(__dirname, '../../build/public', path === '/' ? 'index.html' : path.slice(1)), 'utf8'); }
+                else if (path === '/' || asset || imageType) {
+                    let content: Uint8Array<ArrayBuffer>;
+                    try { content = Uint8Array.from(await fs.readFile(resolve(__dirname, '../../build/public', path === '/' ? 'index.html' : path.slice(1)))); }
                     catch (error) {
                         if ((error as NodeJS.ErrnoException).code === 'ENOENT') return json({ error: 'Ruta no encontrada.' }, 404);
                         throw error;
                     }
                     const type = path === '/' ? 'text/html' : asset?.[1] === 'css' ? 'text/css' : 'text/javascript';
-                    result = new Response(content, { headers: { ...headers, 'Content-Type': `${type}; charset=utf-8` } });
+                    result = new Response(content, { headers: {
+                        ...headers,
+                        'Content-Type': imageType ?? `${type}; charset=utf-8`,
+                        ...(path === '/' ? { 'Content-Security-Policy': `${headers['Content-Security-Policy']}; img-src 'self'` } : {}),
+                        ...(imageType ? { 'Cache-Control': 'public, max-age=86400', 'Content-Security-Policy': "default-src 'none'; sandbox" } : {}),
+                    } });
                 }
                 else if (results) result = json(await store.results({ groupId: results[1], editionId: results[2] }));
                 else if (path === '/api/groups') result = json(await store.groups());

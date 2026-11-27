@@ -1,5 +1,4 @@
 import { Avatar, DeliveryMeter, EventCountdown, EventDateTile, GiftMark, ThemeChoice, useCurrentMinute } from './VisualIdentity';
-import GiftIllustration from "./GiftIllustration";
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { groupsApi, editionApi, type Group, type GroupResponse, type EditionSummary } from './api';
 import DeleteGroup from './DeleteGroup';
@@ -245,7 +244,9 @@ export default function App() {
                             ? navigate({ view: 'draws', section: 'new' })
                             : setCreating(true)}>{groups.length ? 'Nuevo sorteo' : 'Crear mi primer grupo'}</button>
                     </div>
-                    <GiftIllustration />
+                    <div className="hero-art" aria-hidden="true">
+                        <img src="/assets/gift-illustration.webp" alt="" width="700" height="673" />
+                    </div>
                 </div>
                 <div className="section-heading groups-heading"><h2 id="groups-heading" tabIndex={-1}>Grupos</h2>
                     <button disabled={busy} onClick={() => setCreating(true)}>Crear grupo</button></div>

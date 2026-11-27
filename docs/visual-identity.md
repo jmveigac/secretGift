@@ -9,7 +9,9 @@ aplica antes del primer render mediante `frontend/public/assets/theme.js`.
 La tipografía usa Aptos y Segoe UI si están instaladas, con una alternativa del
 sistema. No se redistribuyen fuentes ni se realizan solicitudes externas. El
 símbolo SVG del regalo se dibujó para secretGift. La ilustración WebP original
-se creó con ImageGen y se optimizó localmente. La referencia conceptual privada
+se creó con ImageGen y se optimizó localmente. El favicon SVG y esta
+ilustración tienen rutas estáticas explícitas, MIME propio y caché de un día.
+Solo el documento de la aplicación permite imágenes del mismo origen. La referencia conceptual privada
 no se distribuye.
 
 Los estados combinan texto con color. Los medidores cuentan aceptaciones del
