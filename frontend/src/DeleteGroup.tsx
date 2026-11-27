@@ -4,12 +4,13 @@ import { groupsApi, type Group, type GroupDeletionSummary } from './api';
 
 interface Props {
     groupId: string;
+    compact?: boolean;
     disabled: boolean;
     onBusy: (busy: boolean) => void;
     onDeleted: (groups: Group[]) => void;
 }
 
-export default function DeleteGroup({ groupId, disabled, onBusy, onDeleted }: Props) {
+export default function DeleteGroup({ groupId, disabled, onBusy, onDeleted, compact = false }: Props) {
     const [summary, setSummary] = useState<GroupDeletionSummary>();
     const [confirming, setConfirming] = useState(false);
     const [name, setName] = useState('');
@@ -62,8 +63,8 @@ export default function DeleteGroup({ groupId, disabled, onBusy, onDeleted }: Pr
         });
     }
 
-    return <section className="group-danger">
-        <h3>Eliminar grupo</h3>
+    return <section className={compact ? "group-danger compact-danger" : "group-danger"}>
+        {!compact && <h3>Eliminar grupo</h3>}
         <button className="danger" type="button" ref={opener} disabled={disabled || pending}
             onClick={() => { void run(async () => setSummary(await groupsApi.deletion(groupId))); }}>
             Eliminar grupo

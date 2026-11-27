@@ -1,78 +1,253 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { groupsApi, editionApi, type Group, type GroupResponse } from './api';
+import { groupsApi, editionApi, type Group, type GroupResponse, type EditionSummary } from './api';
 import DeleteGroup from './DeleteGroup';
 import GroupPeople from './GroupPeople';
 import DrawWizard, { type ReferenceDraw } from './DrawWizard';
 import DrawDetail, { eventLabel } from './DrawDetail';
 
-type View = 'groups' | 'new' | 'remind' | 'repeat';
-const navigation: { id: View; label: string }[] = [{ id: 'groups', label: 'Mis grupos' }, { id: 'new', label: 'Nuevo sorteo' }, { id: 'remind', label: 'Recordar sorteo' }, { id: 'repeat', label: 'Repetir sorteo' }];
+type Route = { view: 'groups' | 'draws' | 'help'; group?: string; edition?: string; section?: string };
+function readRoute(): Route {
+    const params = new URLSearchParams(location.search);
+    const view = params.get('view');
+    return { view: view === 'draws' || view === 'help' ? view : 'groups',
+        group: params.get('group') || undefined, edition: params.get('edition') || undefined, section: params.get('section') || undefined };
+}
+function address(route: Route) {
+    const params = new URLSearchParams();
+    if (route.view !== 'groups') params.set('view', route.view);
+    if (route.group) params.set('group', route.group);
+    if (route.edition) params.set('edition', route.edition);
+    if (route.section) params.set('section', route.section);
+    return params.size ? `?${params}` : location.pathname;
+}
+const detailSections = new Set(['notificaciones', 'recordatorios', 'resultados', 'preparar']);
+const destinations = [{ view: 'groups', label: 'Grupos' }, { view: 'draws', label: 'Sorteos' }, { view: 'help', label: 'Ayuda y herramientas' }] as const;
+const leaveDraft = '¿Salir del sorteo en preparación? Los datos sin guardar se perderán.';
+
 export default function App() {
-    const [groups, setGroups] = useState<Group[]>([]), [group, setGroup] = useState<GroupResponse>();
-    const [view, setView] = useState<View>('groups'), [tab, setTab] = useState<'draws' | 'people' | 'settings'>('draws');
-    const [editionId, setEditionId] = useState(''), [reference, setReference] = useState<ReferenceDraw>();
-    const [pending, setPending] = useState(true), [childBusy, setChildBusy] = useState(false), [error, setError] = useState('');
-    const [notice, setNotice] = useState('');
-    const [name, setName] = useState(''), [rename, setRename] = useState('');
-    const lock = useRef(false), heading = useRef<HTMLHeadingElement>(null);
-    const busy = pending || childBusy;
-    useEffect(() => { groupsApi.list().then(data => setGroups(data.groups)).catch(() => setError('No se pudieron cargar los grupos. Actualiza para reintentar.')).finally(() => setPending(false)); }, []);
-    useEffect(() => { heading.current?.focus(); }, [view, group?.group.id, editionId, tab]);
-    async function listGroups() { setGroups((await groupsApi.list()).groups); }
-    async function refreshGroup() { if (group) setGroup(await groupsApi.get(group.group.id)); }
+    const [route, setRoute] = useState(readRoute);
+    const [groups, setGroups] = useState<Group[]>([]);
+    const [snapshots, setSnapshots] = useState<Record<string, GroupResponse>>({});
+    const [reference, setReference] = useState<ReferenceDraw>();
+    const [loading, setLoading] = useState(true), [saving, setSaving] = useState(false), [childBusy, setChildBusy] = useState(false);
+    const [error, setError] = useState(''), [notice, setNotice] = useState('');
+    const [name, setName] = useState(''), [rename, setRename] = useState<string>(), [creating, setCreating] = useState(false);
+    const lock = useRef(false), workspace = useRef<HTMLElement>(null), createInput = useRef<HTMLInputElement>(null);
+    const focusNext = useRef(false), historyIndex = useRef(0), restoring = useRef(false);
+    const group = route.group ? snapshots[route.group] : undefined;
+    const selected = group?.editions.find(item => item.edition.id === route.edition);
+    const preparing = route.section === 'new' || route.section === 'repeat';
+    const busy = saving || childBusy;
+
+    function remember(next: GroupResponse) {
+        setSnapshots(current => ({ ...current, [next.group.id]: next }));
+        setGroups(current => current.some(item => item.id === next.group.id)
+            ? current.map(item => item.id === next.group.id ? next.group : item) : [...current, next.group]);
+    }
+    async function load() {
+        const data = (await groupsApi.list()).groups;
+        setGroups(data);
+        const results = await Promise.allSettled(data.map(item => groupsApi.get(item.id)));
+        setSnapshots(Object.fromEntries(results.flatMap(result => result.status === 'fulfilled'
+            ? [[result.value.group.id, result.value]] : [])));
+        if (results.some(result => result.status === 'rejected')) setError('No se pudieron cargar algunos grupos. Vuelve a intentarlo.');
+    }
+    useEffect(() => {
+        void load().catch(() => setError('No se pudieron cargar los grupos. Vuelve a intentarlo.')).finally(() => setLoading(false));
+        historyIndex.current = history.state?.secretGiftIndex ?? 0;
+        history.replaceState({ secretGiftIndex: historyIndex.current }, '');
+    }, []);
+    useEffect(() => {
+        function pop(event: PopStateEvent) {
+            const nextIndex = event.state?.secretGiftIndex;
+            if (!restoring.current && address(readRoute()) === address(route)) return;
+            if (restoring.current) { restoring.current = false; return; }
+            if ((busy || preparing && !window.confirm(leaveDraft)) && Number.isInteger(nextIndex) && nextIndex !== historyIndex.current) {
+                restoring.current = true;
+                history.go(historyIndex.current - nextIndex);
+                return;
+            }
+            historyIndex.current = Number.isInteger(nextIndex) ? nextIndex : 0;
+            focusNext.current = true;
+            setRoute(readRoute()); setError(''); setNotice('');
+        }
+        window.addEventListener('popstate', pop);
+        return () => window.removeEventListener('popstate', pop);
+    }, [busy, preparing, route]);
+    useEffect(() => {
+        if (!preparing) return;
+        function beforeUnload(event: BeforeUnloadEvent) { event.preventDefault(); event.returnValue = ''; }
+        window.addEventListener('beforeunload', beforeUnload);
+        return () => window.removeEventListener('beforeunload', beforeUnload);
+    }, [preparing]);
+    useEffect(() => {
+        if (route.section !== 'repeat' || !route.group || !selected) return;
+        let current = true;
+        const id = selected.edition.id;
+        editionApi({ groupId: route.group, editionId: id }).state().then(data => {
+            if (current) setReference({ id, name: selected.edition.name, personIds: data.participants.map(person => person.id) });
+        }).catch(() => { if (current) setError('No se pudo preparar la repetición.'); });
+        return () => { current = false; };
+    }, [route.section, route.group, selected?.edition.id]);
+    useEffect(() => {
+        if (!focusNext.current || loading || preparing || route.section && detailSections.has(route.section)) return;
+        focusNext.current = false;
+        workspace.current?.querySelector<HTMLElement>('h2[tabindex="-1"]')?.focus();
+    }, [route, loading, preparing]);
+    useEffect(() => { if (creating) createInput.current?.focus(); }, [creating]);
+
+    function navigate(next: Route, options?: { bypass?: boolean; replace?: boolean }) {
+        if (address(next) === address(route)) return;
+        if (!options?.bypass && (busy || lock.current || preparing && !window.confirm(leaveDraft))) return;
+        if (!options?.replace) historyIndex.current++;
+        history[options?.replace ? 'replaceState' : 'pushState']({ secretGiftIndex: historyIndex.current }, '', address(next));
+        focusNext.current = true;
+        setNotice(''); setError(''); setReference(undefined); setRoute(next);
+        if (next.section !== 'rename') setRename(undefined);
+    }
     async function run(operation: () => Promise<void>) {
-        if (lock.current || busy) { setError('Espera a que termine la solicitud en curso.'); return false; }
-        lock.current = true; setPending(true); setError(''); setNotice('');
-        try { await operation(); return true; } catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudo completar la operación.'); return false; }
-        finally { lock.current = false; setPending(false); }
+        if (lock.current || busy) return false;
+        lock.current = true; setSaving(true); setError(''); setNotice('');
+        try { await operation(); return true; }
+        catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudo completar la operación.'); return false; }
+        finally { lock.current = false; setSaving(false); }
     }
-    function navigate(next: View) { if (busy || lock.current || next === view && (view === 'new' || view === 'repeat' && reference)) return; if ((view === 'new' || view === 'repeat' && reference) && !window.confirm('¿Salir del sorteo en preparación? Los datos de este asistente no se guardarán.')) return; setView(next); setEditionId(''); setReference(undefined); setError(''); if (next === 'groups') { setGroup(undefined); setTab('draws'); } }
-    function openGroup(id: string) { void run(async () => { const next = await groupsApi.get(id); setGroup(next); setRename(next.group.name); setEditionId(''); setTab('draws'); }); }
-    async function createGroup(event: FormEvent) { event.preventDefault(); await run(async () => { const next = await groupsApi.create(name); setGroup(next); setRename(next.group.name); setName(''); setTab('people'); await listGroups(); }); }
-    function groupDeleted(remaining: Group[]) {
-        setGroups(remaining); setGroup(undefined); setEditionId(''); setReference(undefined);
-        setRename(''); setTab('draws'); setView('groups'); setError('');
+    async function createGroup(event: FormEvent) {
+        event.preventDefault();
+        await run(async () => {
+            const next = await groupsApi.create(name);
+            remember(next); setName(''); setCreating(false);
+            navigate({ view: 'groups', group: next.group.id, section: 'people' }, { bypass: true });
+        });
+    }
+    function groupDeleted(id: string, remaining: Group[]) {
+        setGroups(remaining);
+        setSnapshots(current => Object.fromEntries(Object.entries(current).filter(([key]) => key !== id)));
+        navigate({ view: 'groups' }, { bypass: true, replace: true });
         setNotice('Grupo eliminado definitivamente.');
+        requestAnimationFrame(() => document.getElementById('groups-heading')?.focus());
     }
-    function prepareRepeat() {
-        if (!group || !editionId) return;
-        void run(async () => { const state = await editionApi({ groupId: group.group.id, editionId }).state(); const source = group.editions.find(e => e.edition.id === editionId)!; setReference({ id: editionId, name: source.edition.name, personIds: state.participants.map(p => p.id) }); });
+    function groupActions(item: GroupResponse) {
+        return <details className="group-actions">
+            <summary aria-label={`Acciones del grupo ${item.group.name}`}>Acciones del grupo</summary>
+            <button className="secondary" disabled={busy || item.busy} onClick={() => {
+                setRename(item.group.name); navigate({ view: 'groups', group: item.group.id, section: 'rename' });
+            }}>Cambiar nombre</button>
+            <DeleteGroup groupId={item.group.id} disabled={busy} onBusy={setChildBusy} onDeleted={remaining => groupDeleted(item.group.id, remaining)} compact />
+        </details>;
     }
-    const selected = group?.editions.find(e => e.edition.id === editionId);
-    const wizard = view === 'new' || view === 'repeat' && !!reference;
+    function drawCard(item: EditionSummary, owner: GroupResponse, showGroup: boolean) {
+        const failed = (item.delivery?.failed ?? 0) + (item.delivery?.uncertain ?? 0);
+        return <article className="draw-card" key={item.edition.id}>
+            <div className="section-heading"><h3>{item.edition.name}</h3><span className="badge">{item.draw.completed ? 'Confirmado' : 'Borrador'}</span></div>
+            <p>{showGroup && `${owner.group.name} · `}{eventLabel(item)}</p>
+            <p>{item.draw.participantCount} participantes{item.draw.completed && (item.results?.available ? ' · Resultados disponibles' : ' · Resultados ocultos')}</p>
+            {item.draw.completed && <p>Correos · {failed ? 'Necesita revisión' : item.delivery?.active ? 'Envío en curso' : item.delivery?.pending ? `${item.delivery.pending} pendientes` : `${item.delivery?.accepted ?? 0} aceptados`}</p>}
+            <button className="secondary" disabled={busy} onClick={() => navigate({ view: route.view, group: owner.group.id, edition: item.edition.id })}>Abrir {item.edition.name}</button>
+        </article>;
+    }
+    const missing = !loading && (route.group && !group || route.edition && !selected);
+    const ordered = (items: EditionSummary[]) => [...items].sort((a, b) => {
+        const today = new Date().toISOString();
+        function bucket(item: EditionSummary) {
+            if (!item.draw.completed) return 1;
+            return item.edition.schedule && item.edition.schedule.eventAt >= today ? 0 : 2;
+        }
+        const order = bucket(a) - bucket(b);
+        const dates = (a.edition.schedule?.eventAt ?? '').localeCompare(b.edition.schedule?.eventAt ?? '');
+        return order || (bucket(a) === 0 ? dates : -dates);
+    });
+    const list = groups.flatMap(item => {
+        const owner = snapshots[item.id];
+        return owner ? owner.editions.map(edition => ({ edition, owner })) : [];
+    });
+    const owners = new Map(list.map(({ edition, owner }) => [edition.edition.id, owner]));
+    const groupRoute = group ? { view: 'groups' as const, group: group.group.id } : undefined;
+
     return <div className="app-shell">
         <a className="skip-link" href="#workspace">Saltar al contenido</a>
         <aside className="sidebar">
-        <header className="brand"><h1>secretGift</h1></header>
-        <nav className="main-nav" aria-label="Navegación principal">{navigation.map(item => <button key={item.id} className={view === item.id ? 'nav-active' : 'nav-item'} aria-current={view === item.id ? 'page' : undefined} disabled={busy} onClick={() => navigate(item.id)}>{item.label}</button>)}</nav>
-        <div className="sidebar-note"><span className="eyebrow">Amigo invisible</span><p>Cada grupo, su historia.<br />Cada regalo, una sorpresa.</p></div>
+            <header className="brand"><h1>secretGift</h1></header>
+            <nav className="main-nav" aria-label="Navegación principal">{destinations.map(item =>
+                <a key={item.view} href={address(item)} aria-disabled={busy || undefined} aria-current={route.view === item.view ? 'page' : undefined}
+                    className={route.view === item.view ? 'nav-active' : 'nav-item'}
+                    onClick={event => {
+                        if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                        event.preventDefault(); navigate(item);
+                    }}>{item.label}</a>)}</nav>
         </aside>
-        <main id="workspace" tabIndex={-1}>
-        <div className="workspace-label"><span>Organiza tu amigo invisible</span><span className="local-label">Espacio local</span></div>
-        {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}{pending && <p role="status">Cargando o guardando datos…</p>}
-        {wizard ? <DrawWizard key={`${view}:${reference?.id ?? 'new'}`} groups={groups} initialGroup={group} reference={reference} onBusy={setChildBusy} onGroupsChanged={listGroups} onDone={(next, id) => { setGroup(next); setEditionId(id); setView('groups'); setTab('draws'); setReference(undefined); }} /> : <>
-            {view === 'groups' && !group && <section aria-labelledby="groups-heading"><div className="section-heading"><div><p className="eyebrow">Tu punto de partida</p><h2 id="groups-heading" ref={heading} tabIndex={-1}>Mis grupos</h2><p className="section-lead">Reúne a tu gente. Prepara el próximo sorteo.</p></div><button className="secondary" disabled={busy} onClick={() => { void run(listGroups); }}>Actualizar grupos</button></div>
-                {!groups.length && <div className="empty-state"><span className="empty-mark" aria-hidden="true">01</span><div><h3>Tu primer grupo empieza aquí</h3><p>No hay grupos todavía. Crea uno para preparar tu primer sorteo.</p></div></div>}
-                <div className="group-grid">{groups.map(g => <button className="group-card" disabled={busy} key={g.id} onClick={() => openGroup(g.id)}><span className="group-monogram" aria-hidden="true">{g.name.slice(0, 1).toUpperCase()}</span><strong>{g.name}</strong><span>Abrir grupo →</span></button>)}</div>
-                <details className="create-group" open={!groups.length}><summary>Crear grupo</summary><form onSubmit={event => { void createGroup(event); }}><label htmlFor="new-group">Nombre del grupo</label><input id="new-group" value={name} onChange={e => setName(e.target.value)} required maxLength={100} disabled={busy} /><button disabled={busy}>Guardar grupo</button></form></details>
+        <main id="workspace" ref={workspace} tabIndex={-1}>
+            {error && <p role="alert">{error}{!preparing && !group && <button className="secondary" onClick={() => { void run(load); }}>Volver a intentar</button>}</p>}
+            {notice && <p role="status">{notice}</p>}
+            {loading ? <p role="status">Cargando grupos y sorteos…</p> : missing ? <section>
+                <h2 tabIndex={-1}>Este grupo o sorteo ya no está disponible</h2>
+                <button onClick={() => navigate({ view: route.view }, { bypass: true, replace: true })}>Volver a {route.view === 'draws' ? 'Sorteos' : 'Grupos'}</button>
+            </section> : preparing ? <>
+                <button className="secondary" disabled={busy} onClick={() => navigate(route.section === 'repeat'
+                    ? { view: route.view, group: route.group, edition: route.edition } : groupRoute ?? { view: 'draws' })}>Salir de la preparación</button>
+                {route.section === 'repeat' && reference?.id !== route.edition ? (!error && <p role="status">Cargando participantes del sorteo original…</p>)
+                    : <DrawWizard key={address(route)} groups={groups} initialGroup={group} reference={route.section === 'repeat' ? reference : undefined}
+                        onBusy={setChildBusy} onGroupsChanged={load} onDone={(next, id) => {
+                            remember(next); navigate({ view: route.view, group: next.group.id, edition: id }, { bypass: true, replace: true });
+                        }} />}
+            </> : selected && group ? <>
+                <button className="secondary" disabled={busy} onClick={() => navigate(route.view === 'draws' ? { view: 'draws' } : groupRoute!)}>Volver a {route.view === 'draws' ? 'Sorteos' : group.group.name}</button>
+                <DrawDetail key={selected.edition.id} group={group} edition={selected} onBusy={setChildBusy}
+                    onChanged={async () => remember(await groupsApi.get(group.group.id))}
+                    section={route.section}
+                    onSection={section => navigate({ ...route, section })}
+                    onRepeat={() => navigate({ ...route, section: 'repeat' })}
+                    onGroup={() => navigate(groupRoute!)} />
+            </> : group && groupRoute ? <>
+                <button className="secondary" disabled={busy} onClick={() => navigate({ view: 'groups' })}>Volver a Grupos</button>
+                <div className="section-heading"><h2 tabIndex={-1}>{group.group.name}</h2><button disabled={busy || group.busy} onClick={() => navigate({ ...groupRoute, section: 'new' })}>Nuevo sorteo</button></div>
+                <nav className="sub-nav" aria-label="Secciones del grupo">
+                    <button aria-current={route.section !== 'people' ? 'page' : undefined} onClick={() => navigate(groupRoute)}>Sorteos</button>
+                    <button aria-current={route.section === 'people' ? 'page' : undefined} onClick={() => navigate({ ...groupRoute, section: 'people' })}>Participantes</button>
+                    {groupActions(group)}
+                </nav>
+                {route.section === 'people' ? <GroupPeople key={group.group.id} people={group.people} disabled={busy || group.busy}
+                    onSave={(person, id) => run(async () => remember(await groupsApi.person(group, person, id)))} />
+                    : route.section === 'rename' ? <form onSubmit={event => { event.preventDefault(); void run(async () => {
+                        remember(await groupsApi.rename(group, rename ?? group.group.name)); navigate(groupRoute, { bypass: true }); setNotice('Nombre actualizado.');
+                    }); }}><h3>Cambiar nombre</h3><label htmlFor="rename-group">Nombre del grupo</label>
+                        <input id="rename-group" value={rename ?? group.group.name} onChange={event => setRename(event.target.value)} required maxLength={100} />
+                        <div className="actions"><button disabled={busy || group.busy}>Guardar nombre</button><button type="button" className="secondary" onClick={() => navigate(groupRoute)}>Cancelar</button></div>
+                    </form> : <section aria-label="Sorteos del grupo">
+                        <h3>Sorteos del grupo</h3>{!group.editions.length && <p>Aún no hay sorteos en este grupo.</p>}
+                        <div className="draw-grid">{ordered(group.editions).map(item => drawCard(item, group, false))}</div>
+                    </section>}
+            </> : route.view === 'draws' ? <section>
+                <div className="section-heading"><h2 tabIndex={-1}>Sorteos</h2><button onClick={() => navigate({ view: 'draws', section: 'new' })}>Nuevo sorteo</button></div>
+                {!list.length && <p>Aquí aparecerán los sorteos de tus grupos.</p>}
+                <div className="draw-grid">{ordered(list.map(item => item.edition)).map(item => drawCard(item, owners.get(item.edition.id)!, true))}</div>
+            </section> : route.view === 'help' ? <section>
+                <h2 tabIndex={-1}>Ayuda y herramientas</h2>
+                <p><a href="/mail-preview" target="_blank" rel="noopener noreferrer">Vista previa del correo</a> con datos ficticios.</p>
+                <p>Los resultados se pueden consultar en la aplicación a partir de la fecha de revelación. Los correos individuales pueden incluirlos antes.</p>
+                <p>La aplicación es de uso local y no requiere iniciar sesión.</p>
+            </section> : <section aria-labelledby="groups-heading">
+                <div className="section-heading"><h2 id="groups-heading" tabIndex={-1}>Grupos</h2>
+                    <button disabled={busy} onClick={() => setCreating(true)}>Crear grupo</button></div>
+                {creating && <form className="contact-form" onSubmit={event => { void createGroup(event); }}>
+                    <label htmlFor="new-group">Nombre del grupo</label><input ref={createInput} id="new-group" value={name} onChange={event => setName(event.target.value)} required maxLength={100} />
+                    <div className="actions"><button disabled={busy}>Guardar grupo</button><button type="button" className="secondary" onClick={() => setCreating(false)}>Cancelar</button></div>
+                </form>}
+                {!groups.length && <p className="empty-state">Crea tu primer grupo para añadir personas y preparar un sorteo.</p>}
+                <div className="group-grid">{groups.map(item => {
+                    const snapshot = snapshots[item.id];
+                    const target = { view: 'groups' as const, group: item.id };
+                    return <article className="group-card" key={item.id}>
+                        <h3>{item.name}</h3>
+                        {snapshot && <p>{snapshot.people.length} personas · {snapshot.editions.length} sorteos</p>}
+                        {snapshot ? <><div className="actions">
+                            <button className="secondary" disabled={busy} onClick={() => navigate({ ...target, section: 'people' })}>Participantes</button>
+                            <button className="secondary" disabled={busy} onClick={() => navigate(target)}>Sorteos del grupo</button>
+                            <button className="secondary" disabled={busy || snapshot.busy} onClick={() => navigate({ ...target, section: 'new' })}>Nuevo sorteo</button>
+                        </div>{groupActions(snapshot)}</> : <p>No se pudo cargar este grupo.</p>}
+                    </article>;
+                })}</div>
             </section>}
-            {view !== 'groups' && <section aria-label="Seleccionar sorteo"><p className="eyebrow">{view === 'remind' ? 'Las mismas asignaciones, otro aviso' : 'Una nueva edición, su propia historia'}</p><h2 ref={heading} tabIndex={-1}>{view === 'remind' ? 'Recordar sorteo' : 'Repetir sorteo'}</h2><p>{view === 'remind' ? 'Reenvía a todos sin cambiar parejas ni fecha. Cada recordatorio tiene sus propios resultados de envío.' : 'Prepara un nuevo sorteo a partir de uno anterior. El original se conserva y se aplican los antecedentes vigentes.'}</p>
-                <div className="form-grid"><div><label htmlFor="operation-group">Grupo</label><select id="operation-group" value={group?.group.id ?? ''} disabled={busy} onChange={e => openGroup(e.target.value)}><option value="" disabled>Selecciona un grupo</option>{groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}</select></div><div><label htmlFor="operation-edition">Sorteo confirmado</label><select id="operation-edition" value={editionId} disabled={busy || !group} onChange={e => setEditionId(e.target.value)}><option value="" disabled>Selecciona un sorteo</option>{group?.editions.filter(e => e.draw.completed).map(e => <option key={e.edition.id} value={e.edition.id}>{e.edition.name} · {e.edition.year} · {eventLabel(e)}</option>)}</select></div></div>
-                {group && !group.editions.some(e => e.draw.completed) && <p>Este grupo no tiene sorteos confirmados.</p>}
-                {view === 'repeat' && <button disabled={busy || !selected} onClick={prepareRepeat}>Preparar nuevo sorteo</button>}
-            </section>}
-            {group && view === 'groups' && <>
-                <div className="section-heading group-heading"><div><p className="eyebrow">Grupo</p><h2 ref={heading} tabIndex={-1}>{group.group.name}</h2></div><div className="actions"><button className="secondary" disabled={busy} onClick={() => { void run(refreshGroup); }}>Actualizar grupo</button><button disabled={busy || group.busy} onClick={() => { setView('new'); setReference(undefined); }}>Crear otro sorteo</button></div></div>
-                {group.busy && <p role="status">Hay un envío en curso. Actualiza el grupo cuando termine.</p>}
-                <nav className="sub-nav" aria-label="Secciones del grupo">{(['draws', 'people', 'settings'] as const).map(id => <button key={id} aria-current={tab === id ? 'page' : undefined} className={tab === id ? 'nav-active' : 'nav-item'} disabled={busy} onClick={() => { setTab(id); setEditionId(''); }}>{id === 'draws' ? 'Sorteos' : id === 'people' ? 'Participantes' : 'Ajustes'}</button>)}</nav>
-                {tab === 'people' && <GroupPeople key={group.group.id} people={group.people} disabled={busy || group.busy} onSave={(person, id) => run(async () => setGroup(await groupsApi.person(group, person, id)))} />}
-                {tab === 'settings' && <><section><h3>Nombre del grupo</h3><form onSubmit={e => { e.preventDefault(); void run(async () => { const next = await groupsApi.rename(group, rename); setGroup(next); await listGroups(); }); }}><label htmlFor="rename-group">Nombre</label><input id="rename-group" value={rename} onChange={e => setRename(e.target.value)} required maxLength={100} disabled={busy || group.busy} /><button disabled={busy || group.busy}>Guardar nombre</button></form></section>
-                    <DeleteGroup key={group.group.id} groupId={group.group.id} disabled={busy} onBusy={setChildBusy} onDeleted={groupDeleted} />
-                </>}
-                {tab === 'draws' && !selected && <section aria-label="Historial de sorteos"><div className="section-heading"><h3>Historial de sorteos</h3><span className="badge">{group.editions.length} ediciones</span></div>{!group.editions.length && <p>No hay sorteos todavía. Crea el primero para reunir a este grupo.</p>}<div className="draw-grid">{group.editions.map(e => <article className="draw-card" key={e.edition.id}><div className="section-heading"><h4>{e.edition.name}</h4><span className={`badge ${e.draw.completed ? 'badge-confirmed' : 'badge-draft'}`}>{e.draw.completed ? 'Confirmado' : 'Borrador'}</span></div><p>{e.edition.year} · {eventLabel(e)}</p><p>{e.draw.participantCount} participantes · {e.results?.available ? 'Resultados disponibles' : 'Asignaciones ocultas'}</p><p className="delivery-summary">Correos · {e.delivery?.mode === 'test' ? 'pruebas' : e.delivery?.mode === 'production' ? 'producción' : 'sin configurar'}<br /><strong>{e.delivery?.accepted ?? 0} aceptados</strong>{!!((e.delivery?.failed ?? 0) + (e.delivery?.uncertain ?? 0)) ? ' · Hay entregas que revisar' : ` · ${e.delivery?.pending ?? 0} pendientes`}</p><button className="secondary" disabled={busy} onClick={() => setEditionId(e.edition.id)}>Abrir {e.edition.name}</button></article>)}</div></section>}
-            </>}
-            {group && selected && (view === 'remind' || view === 'groups' && tab === 'draws') && <><button className="secondary" disabled={busy} onClick={() => setEditionId('')}>Volver a sorteos</button><DrawDetail key={`${group.group.id}:${selected.edition.id}`} group={group} edition={selected} reminderOnly={view === 'remind'} onBusy={setChildBusy} onChanged={refreshGroup} /></>}
-        </>}
-        <footer><details><summary>Ayuda y herramientas</summary><p><a href="/mail-preview" target="_blank" rel="noopener noreferrer">Vista previa del correo</a> · Ejemplo ficticio; no envía mensajes.</p><p>Uso local sin autenticación. Antes de la revelación, la API oculta las asignaciones incluso al organizador; los correos individuales pueden contenerlas. Después, cualquier persona con acceso a la aplicación puede ver los resultados.</p></details></footer>
-    </main></div>;
+        </main>
+    </div>;
 }

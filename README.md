@@ -11,20 +11,19 @@ Necesitas Docker Engine y Docker Compose v2 o posterior. Desde la raíz del repo
 docker compose up --build
 ```
 
-Abre **http://localhost:8787**. La navegación separa cuatro operaciones:
+Abre **http://localhost:8787**.
 
-- **Mis grupos:** abre un grupo para consultar sus sorteos, gestionar participantes
-  o cambiar su nombre. Editar o desactivar contactos conserva sus identidades y no
-  altera las copias guardadas en sorteos anteriores.
-- **Nuevo sorteo:** sigue los cinco pasos de grupo, participantes, antecedentes,
-  fecha y revisión. Puedes crear un grupo y añadir o editar contactos en el proceso.
-  Desmarcar a alguien lo excluye solo de este sorteo; desactivarlo afecta al directorio.
-- **Recordar sorteo:** selecciona un sorteo confirmado y reenvía a todos sus
-  asignaciones originales, incluidos quienes recibieron el primer correo. Cada
-  recordatorio conserva su propia campaña y sus resultados de entrega.
-- **Repetir sorteo:** parte de uno anterior para crear una edición nueva. Propone
-  sus participantes que siguen activos y permite revisar selección, título y fecha.
-  Conserva el sorteo original y aplica los antecedentes vigentes.
+- En **Grupos** puedes crear un grupo y abrir sus participantes o sorteos.
+  Usa **Añadir persona** o **Guardar y añadir otra** para incorporar contactos.
+  Editar o desactivar contactos conserva sus identidades y el historial.
+- En **Sorteos** encontrarás las ediciones de todos los grupos. Desde un grupo,
+  **Nuevo sorteo** empieza directamente en Participantes. A continuación,
+  completa Evento y antecedentes y confirma en Revisión.
+- Desde un sorteo confirmado, **Recordar sorteo** abre sus campañas de correo.
+  Un nuevo recordatorio usa las asignaciones originales y tiene su propio estado.
+  **Repetir sorteo** prepara una edición nueva con los participantes anteriores
+  que siguen activos. Conserva la edición original y aplica las restricciones vigentes.
+- **Ayuda y herramientas** incluye una vista previa del correo con datos ficticios.
 
 Cada grupo puede celebrar varios sorteos del mismo año, con sus propios títulos y
 fechas. El historial muestra estado, notificaciones y disponibilidad de resultados.
@@ -32,7 +31,7 @@ Los borradores existentes se pueden abrir y preparar antes de confirmarlos.
 Confirmar genera y guarda las asignaciones, **sin enviar correos**. Si no existe
 solución, se informa y no se guarda un sorteo parcial.
 
-En «Antecedentes» indica únicamente relaciones conocidas de sorteos externos,
+En «Antecedentes manuales» indica únicamente relaciones conocidas de sorteos externos,
 completas o parciales, entre personas seleccionadas. Deja vacío lo desconocido;
 si el destinatario anterior no participa, no hace falta una exclusión manual.
 No se inventa un sorteo histórico para completar huecos. Nadie se regala a sí mismo
@@ -72,7 +71,7 @@ docker compose down
 El límite es de 15 participantes; puedes cambiarlo mediante `MAX_PARTICIPANTS`
 al arrancar Docker Compose.
 
-Para eliminar un grupo, abre **Mis grupos → Ajustes → Eliminar grupo**. Revisa
+Para eliminar un grupo, abre **Grupos → Acciones del grupo → Eliminar grupo**. Revisa
 el resumen y confirma escribiendo su nombre. Se eliminan las personas, ediciones,
 asignaciones y estados de correo del grupo, incluidos los recordatorios. Si hay
 un envío activo, espera a que termine. Al eliminar el último grupo puedes crear
