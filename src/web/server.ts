@@ -41,7 +41,7 @@ export const createWebServer = (application = app) => createServer(async (reques
         }));
         response.statusCode = result.status;
         result.headers.forEach((value, name) => response.setHeader(name, value));
-        response.end(await result.text());
+        response.end(Buffer.from(await result.arrayBuffer()));
     } catch {
         const result = json({ error: 'Solicitud no válida.' }, 400);
         response.statusCode = result.status;

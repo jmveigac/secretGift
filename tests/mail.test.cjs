@@ -1,7 +1,7 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const {JSDOM}=require('jsdom');
-const {assignmentContent}=require('../build/web/mail-template');
+const {assignmentContent}=require('../build/mail/assignment-template');
 const {createApp}=require('../build/web/app');
 
 test('assignment HTML and plain text contain the same personalized message without external resources',()=>{
@@ -9,8 +9,8 @@ test('assignment HTML and plain text contain the same personalized message witho
  const document=new JSDOM(html).window.document;
  assert.equal(document.documentElement.lang,'es');
  assert.ok(document.querySelector('meta[name="viewport"]'));
- assert.equal(document.querySelector('h1').textContent,'secretGift');
- for(const phrase of ['Hola Alicia de prueba:', 'En el sorteo de amigo invisible te ha tocado regalar a', 'Bruno de prueba', 'Mantén tu asignación en secreto. ¡Disfruta preparando el regalo!', 'Felices fiestas']){
+ assert.equal(document.querySelector('h1').textContent,'¡Ya tienes un secreto!');
+ for(const phrase of ['Hola Alicia de prueba:', 'Te toca regalar a:', 'Bruno de prueba', 'Guarda el secreto hasta el encuentro.', 'Lo mejor de un regalo empieza con una sorpresa.']){
   assert.ok(document.body.textContent.includes(phrase));assert.ok(text.includes(phrase));
  }
  assert.equal(document.querySelectorAll('script, img, link, iframe, object, embed, form, [src], [href]').length,0);
@@ -27,7 +27,7 @@ test('both dynamic names are escaped as text, including malicious markup, quotes
   assert.equal(document.querySelector('script, img, luna'),null);
   assert.ok(document.body.textContent.includes(`Hola ${name}:`));
   assert.ok([...document.querySelectorAll('p')].some(p=>p.textContent===receiver));
-  assert.ok(text.includes(`Hola ${name}:`));assert.ok(text.includes(`regalar a ${receiver}.`));
+  assert.ok(text.includes(`Hola ${name}:`));assert.ok(text.includes(`regalar a:\n\n${receiver}`));
   assert.ok(html.includes('&lt;'));assert.ok(html.includes('&quot;'));
   if(name===values[0]){assert.ok(html.includes('&amp;'));assert.ok(html.includes('&#39;'));}
  }

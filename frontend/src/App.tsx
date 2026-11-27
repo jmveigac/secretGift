@@ -1,3 +1,5 @@
+import ActionIcon from './ActionIcon';
+import { Avatar, DeliveryMeter, EventCountdown, EventDateTile, GiftMark, ThemeChoice, useCurrentMinute } from './VisualIdentity';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { groupsApi, editionApi, type Group, type GroupResponse, type EditionSummary } from './api';
 import DeleteGroup from './DeleteGroup';
@@ -25,6 +27,8 @@ const destinations = [{ view: 'groups', label: 'Grupos' }, { view: 'draws', labe
 const leaveDraft = '¿Salir del sorteo en preparación? Los datos sin guardar se perderán.';
 
 export default function App() {
+    const now = useCurrentMinute();
+    const [confirmed, setConfirmed] = useState<string>();
     const [route, setRoute] = useState(readRoute);
     const [groups, setGroups] = useState<Group[]>([]);
     const [snapshots, setSnapshots] = useState<Record<string, GroupResponse>>({});
@@ -69,7 +73,9 @@ export default function App() {
             }
             historyIndex.current = Number.isInteger(nextIndex) ? nextIndex : 0;
             focusNext.current = true;
-            setRoute(readRoute()); setError(''); setNotice('');
+            const next = readRoute();
+            if (next.edition !== route.edition) setConfirmed(undefined);
+            setRoute(next); setError(''); setNotice('');
         }
         window.addEventListener('popstate', pop);
         return () => window.removeEventListener('popstate', pop);
@@ -103,6 +109,7 @@ export default function App() {
         history[options?.replace ? 'replaceState' : 'pushState']({ secretGiftIndex: historyIndex.current }, '', address(next));
         focusNext.current = true;
         setNotice(''); setError(''); setReference(undefined); setRoute(next);
+        if (!options?.bypass && next.edition !== route.edition) setConfirmed(undefined);
         if (next.section !== 'rename') setRename(undefined);
     }
     async function run(operation: () => Promise<void>) {
@@ -129,20 +136,22 @@ export default function App() {
     }
     function groupActions(item: GroupResponse) {
         return <details className="group-actions">
-            <summary aria-label={`Acciones del grupo ${item.group.name}`}>Acciones del grupo</summary>
-            <button className="secondary" disabled={busy || item.busy} onClick={() => {
-                setRename(item.group.name); navigate({ view: 'groups', group: item.group.id, section: 'rename' });
-            }}>Cambiar nombre</button>
-            <DeleteGroup groupId={item.group.id} disabled={busy} onBusy={setChildBusy} onDeleted={remaining => groupDeleted(item.group.id, remaining)} compact />
+            <summary aria-label={`Acciones del grupo ${item.group.name}`}><ActionIcon icon="chevron" />Acciones del grupo</summary>
+            <div className="group-action-row">
+                <button className="secondary" disabled={busy || item.busy} onClick={() => {
+                    setRename(item.group.name); navigate({ view: 'groups', group: item.group.id, section: 'rename' });
+                }}><ActionIcon icon="edit" />Cambiar nombre</button>
+                <DeleteGroup groupId={item.group.id} disabled={busy} onBusy={setChildBusy} onDeleted={remaining => groupDeleted(item.group.id, remaining)} compact />
+            </div>
         </details>;
     }
     function drawCard(item: EditionSummary, owner: GroupResponse, showGroup: boolean) {
-        const failed = (item.delivery?.failed ?? 0) + (item.delivery?.uncertain ?? 0);
+        const upcoming = item.edition.schedule && Date.parse(item.edition.schedule.eventAt) > now;
         return <article className="draw-card" key={item.edition.id}>
-            <div className="section-heading"><h3>{item.edition.name}</h3><span className="badge">{item.draw.completed ? 'Confirmado' : 'Borrador'}</span></div>
+            <div className="draw-card-head"><EventDateTile schedule={item.edition.schedule} /><div><h3>{item.edition.name}</h3><span className="badge" data-state={item.draw.completed ? "confirmed" : "draft"}>{item.draw.completed ? upcoming ? 'Próximo · Confirmado' : item.edition.schedule ? 'Pasado · Confirmado' : 'Confirmado' : 'Borrador'}</span></div></div>
             <p>{showGroup && `${owner.group.name} · `}{eventLabel(item)}</p>
             <p>{item.draw.participantCount} participantes{item.draw.completed && (item.results?.available ? ' · Resultados disponibles' : ' · Resultados ocultos')}</p>
-            {item.draw.completed && <p>Correos · {failed ? 'Necesita revisión' : item.delivery?.active ? 'Envío en curso' : item.delivery?.pending ? `${item.delivery.pending} pendientes` : `${item.delivery?.accepted ?? 0} aceptados`}</p>}
+            {item.draw.completed && <DeliveryMeter delivery={item.delivery} />}
             <button className="secondary" disabled={busy} onClick={() => navigate({ view: route.view, group: owner.group.id, edition: item.edition.id })}>Abrir {item.edition.name}</button>
         </article>;
     }
@@ -167,7 +176,7 @@ export default function App() {
     return <div className="app-shell">
         <a className="skip-link" href="#workspace">Saltar al contenido</a>
         <aside className="sidebar">
-            <header className="brand"><h1>secretGift</h1></header>
+            <header className="brand"><span className="brand-mark"><GiftMark /></span><h1>secretGift</h1></header>
             <nav className="main-nav" aria-label="Navegación principal">{destinations.map(item =>
                 <a key={item.view} href={address(item)} aria-disabled={busy || undefined} aria-current={route.view === item.view ? 'page' : undefined}
                     className={route.view === item.view ? 'nav-active' : 'nav-item'}
@@ -175,6 +184,7 @@ export default function App() {
                         if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
                         event.preventDefault(); navigate(item);
                     }}>{item.label}</a>)}</nav>
+            <ThemeChoice />
         </aside>
         <main id="workspace" ref={workspace} tabIndex={-1}>
             {error && <p role="alert">{error}{!preparing && !group && <button className="secondary" onClick={() => { void run(load); }}>Volver a intentar</button>}</p>}
@@ -188,16 +198,22 @@ export default function App() {
                 {route.section === 'repeat' && reference?.id !== route.edition ? (!error && <p role="status">Cargando participantes del sorteo original…</p>)
                     : <DrawWizard key={address(route)} groups={groups} initialGroup={group} reference={route.section === 'repeat' ? reference : undefined}
                         onBusy={setChildBusy} onGroupsChanged={load} onDone={(next, id) => {
-                            remember(next); navigate({ view: route.view, group: next.group.id, edition: id }, { bypass: true, replace: true });
+                            remember(next); setConfirmed(id); navigate({ view: route.view, group: next.group.id, edition: id }, { bypass: true, replace: true });
                         }} />}
             </> : selected && group ? <>
-                <button className="secondary" disabled={busy} onClick={() => navigate(route.view === 'draws' ? { view: 'draws' } : groupRoute!)}>Volver a {route.view === 'draws' ? 'Sorteos' : group.group.name}</button>
-                <DrawDetail key={selected.edition.id} group={group} edition={selected} onBusy={setChildBusy}
+                <nav className="draw-trail" aria-label="Ruta del sorteo">
+                    {route.view === 'draws' && <><button className="secondary crumb" disabled={busy} onClick={() => navigate({ view: 'draws' })}>Sorteos</button><ActionIcon icon="chevron" /></>}
+                    <button className="secondary crumb" disabled={busy} onClick={() => navigate(groupRoute!)}>{group.group.name}</button>
+                </nav>
+                {confirmed === selected.edition.id && <div className="confirmation-moment" role="status"><GiftMark />
+                    <div><strong>Sorteo confirmado</strong><p>{selected.edition.name} · {eventLabel(selected)}. Todavía no se han enviado correos.</p></div>
+                    <button type="button" className="secondary" onClick={() => setConfirmed(undefined)}>Cerrar aviso</button>
+                </div>}
+                <DrawDetail now={now} key={selected.edition.id} group={group} edition={selected} onBusy={setChildBusy}
                     onChanged={async () => remember(await groupsApi.get(group.group.id))}
                     section={route.section}
                     onSection={section => navigate({ ...route, section })}
-                    onRepeat={() => navigate({ ...route, section: 'repeat' })}
-                    onGroup={() => navigate(groupRoute!)} />
+                    onRepeat={() => navigate({ ...route, section: 'repeat' })} />
             </> : group && groupRoute ? <>
                 <button className="secondary" disabled={busy} onClick={() => navigate({ view: 'groups' })}>Volver a Grupos</button>
                 <div className="section-heading"><h2 tabIndex={-1}>{group.group.name}</h2><button disabled={busy || group.busy} onClick={() => navigate({ ...groupRoute, section: 'new' })}>Nuevo sorteo</button></div>
@@ -227,7 +243,17 @@ export default function App() {
                 <p>Los resultados se pueden consultar en la aplicación a partir de la fecha de revelación. Los correos individuales pueden incluirlos antes.</p>
                 <p>La aplicación es de uso local y no requiere iniciar sesión.</p>
             </section> : <section aria-labelledby="groups-heading">
-                <div className="section-heading"><h2 id="groups-heading" tabIndex={-1}>Grupos</h2>
+                <div className="gift-hero">
+                    <div className="gift-hero-copy"><p>Amigo invisible</p><h2>La magia está<br />en la sorpresa.</h2>
+                        <button disabled={busy} onClick={() => groups.length
+                            ? navigate({ view: 'draws', section: 'new' })
+                            : setCreating(true)}>{groups.length ? 'Nuevo sorteo' : 'Crear mi primer grupo'}</button>
+                    </div>
+                    <div className="hero-art" aria-hidden="true">
+                        <img src="/assets/gift-illustration.webp" alt="" width="700" height="673" />
+                    </div>
+                </div>
+                <div className="section-heading groups-heading"><h2 id="groups-heading" tabIndex={-1}>Grupos</h2>
                     <button disabled={busy} onClick={() => setCreating(true)}>Crear grupo</button></div>
                 {creating && <form className="contact-form" onSubmit={event => { void createGroup(event); }}>
                     <label htmlFor="new-group">Nombre del grupo</label><input ref={createInput} id="new-group" value={name} onChange={event => setName(event.target.value)} required maxLength={100} />
@@ -237,9 +263,18 @@ export default function App() {
                 <div className="group-grid">{groups.map(item => {
                     const snapshot = snapshots[item.id];
                     const target = { view: 'groups' as const, group: item.id };
+                    const next = snapshot && ordered(snapshot.editions).find(draw =>
+                        draw.draw.completed && draw.edition.schedule && Date.parse(draw.edition.schedule.eventAt) > now);
                     return <article className="group-card" key={item.id}>
-                        <h3>{item.name}</h3>
-                        {snapshot && <p>{snapshot.people.length} personas · {snapshot.editions.length} sorteos</p>}
+                        <div className="group-card-head"><Avatar name={item.name} /><div><h3>{item.name}</h3>
+                            {snapshot && <p>{snapshot.people.length} {snapshot.people.length === 1 ? 'persona' : 'personas'} · {snapshot.editions.length} {snapshot.editions.length === 1 ? 'sorteo' : 'sorteos'}</p>}</div></div>
+                        {next && <div className="group-event">
+                            <div className="group-event-title"><div><span className="badge" data-state="confirmed">Próximo · Confirmado</span>
+                                <h4>{next.edition.name}</h4><p>{eventLabel(next)}</p></div>
+                                <EventCountdown schedule={next.edition.schedule} now={now} /></div>
+                            <DeliveryMeter delivery={next.delivery} />
+                            <button className="secondary event-link" disabled={busy} onClick={() => navigate({ ...target, edition: next.edition.id })}>Ver sorteo <span aria-hidden="true">→</span></button>
+                        </div>}
                         {snapshot ? <><div className="actions">
                             <button className="secondary" disabled={busy} onClick={() => navigate({ ...target, section: 'people' })}>Participantes</button>
                             <button className="secondary" disabled={busy} onClick={() => navigate(target)}>Sorteos del grupo</button>

@@ -3,7 +3,7 @@ import Mail from './models/mail';
 import Participants from './models/participants';
 import { readJson, writeJson } from './utils/commonUtils';
 import envUtils from './utils/envUtils';
-import { createHtmlMessage } from './utils/messageUtils';
+import { assignmentContent } from './mail/assignment-template';
 import { confirmUser, readUserData } from './utils/userInterfaceUtils';
 
 import { drawParticipants } from './domain/draw';
@@ -40,11 +40,14 @@ export const createNewSecretGiftList = (participants: Participants[]): Participa
     drawParticipants(participants, max => crypto.randomInt(max));
 
 export const createMailList = (participants: Participants[]): Mail[] => {
-    return participants.map(participant => ({
-        participantName: participant.name,
-        destinyMail: participant.email,
-        subject: `${envUtils.SUBJECT} ${new Date().getFullYear()}`,
-        messageText: `Este año tu amigo invisible es: ${participant.lastGift} No olvides los regalos :D`,
-        messageHtml: createHtmlMessage(participant, participant.lastGift)
-    }));
+    return participants.map(participant => {
+        const content = assignmentContent(participant.name, participant.lastGift);
+        return {
+            participantName: participant.name,
+            destinyMail: participant.email,
+            subject: `${envUtils.SUBJECT} ${new Date().getFullYear()}`,
+            messageText: content.text,
+            messageHtml: content.html,
+        };
+    });
 };

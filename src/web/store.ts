@@ -364,7 +364,7 @@ export class LocalStore {
             const unlock = releaseEdition;
             const path = activePath;
             const completion = new Promise<void>(resolve => setImmediate(resolve))
-                .then(() => this.processMail(target, operation, state, assignments))
+                .then(() => this.processMail(target, operation, state, assignments, edition.schedule))
                 .finally(async () => { activeEditions.delete(path); await unlock(); });
             // HTTP callers only need the reservation. Terminal status is persisted by the worker.
             void completion.catch(() => undefined);
@@ -377,7 +377,7 @@ export class LocalStore {
             await releaseWrite();
         }
     }
-    private async processMail(scope: EditionScope, operation: MailOperation, state: State, assignments: NonNullable<State['draw']>['assignments']) {
+    private async processMail(scope: EditionScope, operation: MailOperation, state: State, assignments: NonNullable<State['draw']>['assignments'], schedule?: Schedule) {
         let terminal: 'finished' | 'limited' | 'interrupted' = 'interrupted';
         try {
             for (const assignment of assignments) {
@@ -394,7 +394,7 @@ export class LocalStore {
                 };
                 if (!this.mail.controlsAttemptStart) await beforeAttempt();
                 let outcome: Delivery | 'rateLimited' = 'uncertain';
-                try { outcome = await this.mail.send({ to: giver.email, name: giver.name, receiver: receiver.name }, beforeAttempt, this.shutdown.signal); }
+                try { outcome = await this.mail.send({ to: giver.email, name: giver.name, receiver: receiver.name, schedule, reminder: operation.kind === 'reminder' || operation.kind === 'retryReminder' }, beforeAttempt, this.shutdown.signal); }
                 catch { /* An interrupted transport may have been accepted. */ }
                 if (!started) throw new Error('Could not persist SMTP attempt');
                 await this.database(db => db.recordMailAttempt(scope, operation, giver.id, outcome === 'rateLimited' ? 'failed' : outcome, true));

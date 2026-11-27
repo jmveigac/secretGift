@@ -96,14 +96,49 @@ test('HTTP adapter accepts bodies, limits sizes and protects private routes', as
  assert.equal(await (await fetch(base+'/mail-preview',{method:'HEAD'})).text(),'');
  assert.match(html,/secretGift/);assert.match(html,/<div id="root"><\/div>/);
  const assetPaths=[...html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map(match=>match[1]);
- assert.equal(assetPaths.length,2);
+ assert.equal(assetPaths.length,4);
+ assert.equal(assetPaths.filter(asset=>asset.endsWith('.js')).length,2);
+ assert.equal(assetPaths.filter(asset=>asset.endsWith('.css')).length,1);
+ assert.ok(assetPaths.includes('/assets/theme.js'));
  for (const asset of assetPaths) {
   const response=await fetch(base+asset);assert.equal(response.status,200);
-  assert.match(response.headers.get('content-type'),asset.endsWith('.js')?/text\/javascript/:/text\/css/);
+  assert.match(response.headers.get('content-type'),asset.endsWith('.js')?/text\/javascript/:asset.endsWith('.css')?/text\/css/:/image\/svg\+xml/);
   assert.equal((await fetch(base+asset,{method:'HEAD'})).status,200);
  }
+ const illustration=await fetch(base+'/assets/gift-illustration.webp');
+ assert.equal(illustration.status,200);
+ assert.deepEqual(Buffer.from(await illustration.arrayBuffer()),await fs.readFile('build/public/assets/gift-illustration.webp'));
  assert.equal(home.headers.get('content-security-policy').includes('unsafe-inline'),false);
  for (const route of ['/app.js','/src/main.tsx','/frontend/src/App.tsx','/vite.config.mts','/assets/../state.json','/assets/%2e%2e%2fstate.json','/assets/index.js.map','/assets/missing.js','/assets/.env']) assert.equal((await fetch(base+route)).status,404);
+});
+
+test('only the two brand images are served with explicit MIME types and a scoped image policy', async t => {
+ const {app} = await setup(t);
+ const get = (path, method = 'GET') => app.fetch(new Request('http://localhost'+path, {method}));
+ for (const [path, type, magic] of [
+  ['/assets/favicon.svg','image/svg+xml', /^<svg /],
+  ['/assets/gift-illustration.webp','image/webp', /^RIFF....WEBP/s],
+ ]) {
+  const response = await get(path);
+  assert.equal(response.status,200);
+  assert.equal(response.headers.get('content-type'),type);
+  assert.equal(response.headers.get('cache-control'),'public, max-age=86400');
+  assert.equal(response.headers.get('x-content-type-options'),'nosniff');
+  assert.equal(response.headers.get('content-security-policy'),"default-src 'none'; sandbox");
+  assert.match(Buffer.from(await response.arrayBuffer()).toString('latin1'),magic);
+  const head = await get(path,'HEAD');
+  assert.equal(head.status,200);
+  assert.equal(head.headers.get('content-type'),type);
+  assert.equal(await head.text(),'');
+  assert.equal((await get(path,'POST')).status,405);
+ }
+ const policy = (await get('/')).headers.get('content-security-policy');
+ assert.match(policy,/; img-src 'self'$/);
+ assert.doesNotMatch(policy,/unsafe-|data:|blob:|\*/);
+ assert.doesNotMatch((await get('/api/health')).headers.get('content-security-policy'),/img-src/);
+ for (const path of ['/favicon.svg','/assets/other.svg','/assets/other.webp','/assets/theme.js.svg',
+  '/assets/data/state.sqlite','/assets/%2e%2e%2fkeys%2fstorage.key','/data/state.sqlite',
+  '/data/state.sqlite-wal','/keys/storage.key','/.env','/compose.yaml']) assert.equal((await get(path)).status,404,path);
 });
 
 test('direct Request API also enforces streaming body limits and impossible restrictions', async t => {
