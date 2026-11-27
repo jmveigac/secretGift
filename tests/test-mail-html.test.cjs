@@ -87,3 +87,19 @@ test('distinct deliveries get distinct MIME Message-IDs even for identical test 
   for(let i=0;i<2;i++){assert.ok(compiled[i].message.toString().includes('Message-ID: '+compiled[i].messageId));assert.equal(messages[i].to,config.TEST_EMAIL);assert.deepEqual(compiled[i].envelope.to,[config.TEST_EMAIL]);}
  });
 });
+
+test('production normalizes Unicode recipient domains in the compiled envelope', async () => {
+ const { domainToASCII } = require('node:url');
+ const sender = smtpSender({ ...config, APP_MODE: 'production' });
+ await capture(async ({ compiled }) => {
+  for (const domain of ['BÜCHER.invalid', 'ΔΕΣ.invalid', 'STRAẞE.invalid']) {
+   const recipient = 'person@' + domain;
+   const normalized = domainToASCII(domain);
+   assert.ok(normalized);
+   assert.equal(await sender.send({ to: recipient, name: 'Álex', receiver: 'Íñigo' }), 'accepted');
+   const message = compiled.at(-1);
+   assert.deepEqual(message.envelope.to, ['person@' + normalized]);
+   assert.doesNotMatch(message.message.toString(), /test@example\.invalid/);
+  }
+ });
+});
