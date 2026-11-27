@@ -60,6 +60,6 @@ if (require.main === module) {
             : 'No se pudo abrir el almacenamiento: comprueba la integridad, los permisos y la clave original.');
         process.exitCode = 1;
     });
-    const stop = () => server.close();
+    const stop = () => { defaultStore.stopMail(); server.close(); };
     process.once('SIGTERM', stop); process.once('SIGINT', stop);
 }

@@ -91,7 +91,7 @@ test('manual previousId remains enforced without verified history; verified hist
 });
 async function downgrade(f){
  const db=new DatabaseSync(f.file);try{
-  db.exec('DROP INDEX draw_history_sequence; ALTER TABLE draw DROP COLUMN history_sequence; ALTER TABLE draw DROP COLUMN restrictions; PRAGMA user_version=2;');
+  db.exec('DROP TABLE mail_operations; DROP INDEX draw_history_sequence; ALTER TABLE draw DROP COLUMN history_sequence; ALTER TABLE draw DROP COLUMN restrictions; PRAGMA user_version=2;');
  }finally{db.close();}
 }
 test('v2 migration leaves ambiguous history unordered, preserves snapshots and key, and starts a new verified sequence',async()=>{
@@ -105,7 +105,7 @@ test('v2 migration leaves ambiguous history unordered, preserves snapshots and k
  assert.deepEqual(await fs.readFile(f.key),key);
  const c=await f.edition('New');await f.draw(c);const d=await f.edition('Next');await f.draw(d);avoids(await f.read(d),pairs(await f.read(c)));
  const check=await f.open();try{assert.deepEqual(check.previousRecipients(a),{});}finally{check.close();}
- const sql=new DatabaseSync(f.file);try{assert.equal(sql.prepare('PRAGMA user_version').get().user_version,4);assert.equal(sql.prepare('SELECT COUNT(*) n FROM draw WHERE history_sequence IS NULL').get().n,2);}finally{sql.close();}
+ const sql=new DatabaseSync(f.file);try{assert.equal(sql.prepare('PRAGMA user_version').get().user_version,6);assert.equal(sql.prepare('SELECT COUNT(*) n FROM draw WHERE history_sequence IS NULL').get().n,2);}finally{sql.close();}
 });
 test('v2 migration rolls back DDL, ciphertext and version on failure, then retries safely',async()=>{
  for(const point of ['ALTER TABLE draw ADD COLUMN restrictions','CREATE UNIQUE INDEX draw_history_sequence','PRAGMA user_version=3']){

@@ -1,10 +1,12 @@
+import { validateSchedule, type Schedule } from '../domain/schedule';
 import { DatabaseSync } from 'node:sqlite';
 import { promises as fs } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
 import { randomBytes, randomUUID, createCipheriv, createDecipheriv, createHmac } from 'node:crypto';
 import { storageLock } from './lock';
-import { validateState, type State, type Group, type Person, type Edition } from '../domain/editions';
+import { validateState, type State, type Group, type Person, type Edition, type Delivery } from '../domain/editions';
 import { isDeepStrictEqual } from 'node:util';
+import type { EditionScope, MailOperation } from './contracts';
 import { ImportError, parseLegacy, parseImportPlan, prepareLegacyImport } from '../domain/legacy-import';
 
 export class MissingDatabaseError extends Error {
@@ -34,7 +36,7 @@ export class EncryptedDatabase {
         await fs.mkdir(dirname(path), { recursive: true, mode: 0o700 });
         await fs.chmod(dirname(path), 0o700);
         // Initialization is serialized independently from the long-lived SMTP lock.
-        const release = await storageLock(`${path}.init`);
+        const release = await storageLock(`${path}.init`, 5);
         let db: DatabaseSync | undefined;
         try {
             const exists = await fs.stat(path).then(() => true, e => { if (e.code === 'ENOENT') return false; throw e; });
@@ -101,7 +103,7 @@ export class EncryptedDatabase {
                     if (!isDeepStrictEqual(source, store.readCurrent())) throw new Error('Migration verification failed');
                     db!.exec('PRAGMA user_version=2');
                 });
-            } else if (version !== 2 && version !== 3 && version !== 4) throw new Error('Incompatible database');
+            } else if (version !== 2 && version !== 3 && version !== 4 && version !== 5 && version !== 6) throw new Error('Incompatible database');
             if (version < 3) store.transaction(() => {
                 store.checkIntegrity(); store.authenticate(); store.validateAll();
                 const before = store.snapshot();
@@ -123,6 +125,36 @@ export class EncryptedDatabase {
                 if (!columns.some(c => c.name === 'test_status')) db!.exec("ALTER TABLE assignments ADD COLUMN test_status TEXT NOT NULL DEFAULT 'pending' CHECK(test_status IN ('pending','uncertain','accepted','failed'))");
                 if (!isDeepStrictEqual(before, store.snapshot())) throw new Error('Migration verification failed');
                 db!.exec('PRAGMA user_version=4');
+            });
+            if (version < 5) store.transaction(() => {
+                store.checkIntegrity(); store.authenticate(); store.validateAll();
+                const before = store.snapshot();
+                if (!db!.prepare('PRAGMA table_info(editions)').all().some(c => c.name === 'schedule')) db!.exec('ALTER TABLE editions ADD COLUMN schedule BLOB');
+                db!.exec(`CREATE TABLE IF NOT EXISTS mail_campaigns (
+                    id TEXT PRIMARY KEY, group_id TEXT NOT NULL, edition_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL, mode TEXT NOT NULL CHECK(mode IN ('test','production')), revision TEXT NOT NULL,
+                    FOREIGN KEY(group_id,edition_id) REFERENCES editions(group_id,id));
+                    CREATE TABLE IF NOT EXISTS campaign_deliveries (
+                    campaign_id TEXT NOT NULL REFERENCES mail_campaigns(id), giver TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('pending','uncertain','accepted','failed')),
+                    PRIMARY KEY(campaign_id,giver));`);
+                store.validateAll();
+                if (!isDeepStrictEqual(before, store.snapshot())) throw new Error('Migration verification failed');
+                db!.exec('PRAGMA user_version=5');
+            });
+            if (version < 6) store.transaction(() => {
+                store.checkIntegrity(); store.authenticate(); store.validateAll();
+                db!.exec(`CREATE TABLE mail_operations (
+                    group_id TEXT NOT NULL, edition_id TEXT NOT NULL, id TEXT NOT NULL,
+                    mode TEXT NOT NULL CHECK(mode IN ('test','production')),
+                    kind TEXT NOT NULL CHECK(kind IN ('initial','reminder','retryInitial','retryReminder')),
+                    campaign_id TEXT REFERENCES mail_campaigns(id),
+                    status TEXT NOT NULL CHECK(status IN ('running','finished','limited','interrupted')),
+                    total INTEGER NOT NULL CHECK(total BETWEEN 0 AND 100),
+                    processed INTEGER NOT NULL DEFAULT 0 CHECK(processed BETWEEN 0 AND total),
+                    PRIMARY KEY(group_id,edition_id),
+                    FOREIGN KEY(group_id,edition_id) REFERENCES editions(group_id,id));`);
+                db!.exec('PRAGMA user_version=6');
             });
             store.transaction(() => {
                 store.checkIntegrity();
@@ -225,7 +257,7 @@ export class EncryptedDatabase {
         this.requireGroup(groupId); this.validateName(name);
         if (!Number.isInteger(year) || year < 1 || year > 9999) throw new Error('Invalid edition year');
         const id = randomUUID();
-        this.db.prepare('INSERT INTO editions VALUES (?, ?, ?, ?)').run(id, groupId, this.seal(name, this.scope(groupId, id, 'name')), year);
+        this.db.prepare('INSERT INTO editions (id, group_id, private, year) VALUES (?, ?, ?, ?)').run(id, groupId, this.seal(name, this.scope(groupId, id, 'name')), year);
         return { id, groupId, name, year };
     }
     listEditions(groupId: string): Edition[] {
@@ -234,8 +266,16 @@ export class EncryptedDatabase {
             const id = row.id as string, name = this.unseal(row.private, this.scope(groupId, id, 'name')), year = row.year as number;
             this.validateId(id); this.validateName(name);
             if (!Number.isInteger(year) || year < 1 || year > 9999) throw new Error('Invalid edition year');
-            return { id, groupId, name, year };
+            const schedule: Schedule | undefined = row.schedule == null ? undefined : this.unseal(row.schedule, this.scope(groupId, id, 'schedule'));
+            if (schedule) validateSchedule(schedule);
+            return { id, groupId, name, year, ...(schedule ? { schedule } : {}) };
         });
+    }
+    editionInfo(scope?: { groupId: string; editionId: string }): Edition {
+        const target = scope ?? this.current();
+        const edition = this.listEditions(target.groupId).find(e => e.id === target.editionId);
+        if (!edition) throw new Error('Edition not found');
+        return edition;
     }
     private requireEdition(groupId: string, editionId: string) {
         this.validateId(groupId); this.validateId(editionId);
@@ -261,19 +301,27 @@ export class EncryptedDatabase {
     }
     // Directory changes never mutate participation snapshots in existing editions.
     putPerson(groupId: string, person: Person) { this.transaction(() => this.savePerson(groupId, person)); }
-    createEdition(groupId: string, name: string, year: number, personIds: string[]): Edition {
+    createEdition(groupId: string, name: string, year: number, personIds: string[], options: EditionOptions = {}): Edition {
         return this.transaction(() => {
             const people = this.listPeople(groupId);
             const participants = personIds.map(id => {
                 const person = people.find(p => p.id === id && p.active);
                 if (!person) throw new Error('Active group member not found');
-                return { id, name: person.name, email: person.email, previousId: null };
+                return { id, name: person.name, email: person.email, previousId: options.previousIds?.[id] ?? null };
             });
+            if (options.previousIds && Object.keys(options.previousIds).some(id => !personIds.includes(id))) throw new Error('Invalid previous participant');
             const state: State = { version: 1, participants, draw: null };
             validateState(state);
             const edition = this.insertEdition(groupId, name, year);
             this.replace(groupId, edition.id, state);
-            return edition;
+            if (options.schedule) this.configureEdition(groupId, edition.id, name, year, options.schedule, false);
+            if (options.prepare) {
+                const confirmed = options.prepare(state, this.effectiveRestrictions(state, { groupId, editionId: edition.id }));
+                this.confirmHistory(groupId, edition.id, state, confirmed);
+                this.replace(groupId, edition.id, confirmed);
+                this.sequenceDraw(groupId, edition.id, state, confirmed);
+            }
+            return this.listEditions(groupId).find(e => e.id === edition.id)!;
         });
     }
     private current(): { groupId: string; editionId: string } {
@@ -337,6 +385,9 @@ export class EncryptedDatabase {
             for (const edition of this.listEditions(group.id)) this.readState(group.id, edition.id);
         }
         this.readCurrent();
+        if (this.db.prepare("SELECT 1 FROM sqlite_master WHERE name='mail_campaigns'").get()) {
+            for (const row of this.db.prepare('SELECT * FROM mail_campaigns').all()) this.readCampaign(row.group_id as string, row.edition_id as string, row.id as string);
+        }
     }
     private syncPeople(groupId: string, state: State, before?: State) {
         for (const person of before?.participants ?? []) {
@@ -365,9 +416,9 @@ export class EncryptedDatabase {
         }
     }
     /** Internal only: never serialize these IDs in HTTP responses. */
-    previousRecipients(scope?: { groupId: string; editionId: string }): Record<string, string> {
-        const { groupId, editionId } = scope ?? this.current();
-        this.requireEdition(groupId, editionId);
+    previousRecipients(scope?: { groupId: string; editionId: string }, newGroupId?: string): Record<string, string> {
+        const { groupId, editionId } = newGroupId ? { groupId: newGroupId, editionId: '' } : scope ?? this.current();
+        if (!newGroupId) this.requireEdition(groupId, editionId);
         const target = this.db.prepare('SELECT history_sequence FROM draw WHERE group_id=? AND edition_id=?').get(groupId, editionId);
         const result: Record<string, string> = {};
         if (target && target.history_sequence == null) return result;
@@ -380,8 +431,8 @@ export class EncryptedDatabase {
         }
         return result;
     }
-    effectiveRestrictions(state: State, scope?: { groupId: string; editionId: string }): Record<string, string | null> {
-        const history = this.previousRecipients(scope), ids = new Set(state.participants.map(p => p.id));
+    effectiveRestrictions(state: State, scope?: { groupId: string; editionId: string }, newGroupId?: string): Record<string, string | null> {
+        const history = this.previousRecipients(scope, newGroupId), ids = new Set(state.participants.map(p => p.id));
         return Object.fromEntries(state.participants.map(p => {
             const recipient = history[p.id] ?? p.previousId;
             return [p.id, recipient && ids.has(recipient) ? recipient : null];
@@ -420,7 +471,11 @@ export class EncryptedDatabase {
             this.sequenceDraw(groupId, editionId, before, state);
         });
     }
-    forkEdition(groupId: string, editionId: string): Edition {
+    forkEdition(groupId: string, editionId: string, options?: EditionOptions & { name: string; year: number; personIds: string[] }): Edition {
+        if (options) {
+            if (!this.readEdition(groupId, editionId).draw) throw new Error('Edition has no draw');
+            return this.createEdition(groupId, options.name, options.year, options.personIds, options);
+        }
         return this.transaction(() => {
             const state = this.readState(groupId, editionId);
             if (!state.draw) throw new Error('Edition has no draw');
@@ -454,10 +509,79 @@ export class EncryptedDatabase {
             }
         });
     }
-    /** Caller must hold storageLock(path), shared with all web writers and SMTP. */
+    configureEdition(groupId: string, editionId: string, name: string, year: number, schedule: Schedule, transaction = true) {
+        const apply = () => {
+            this.requireEdition(groupId, editionId); this.validateName(name); validateSchedule(schedule);
+            if (!Number.isInteger(year) || year < 1 || year > 9999 || this.readState(groupId, editionId).draw) throw new Error('Confirmed edition is immutable');
+            this.db.prepare('UPDATE editions SET private=?, year=?, schedule=? WHERE group_id=? AND id=?').run(
+                this.seal(name, this.scope(groupId, editionId, 'name')), year, this.seal(schedule, this.scope(groupId, editionId, 'schedule')), groupId, editionId);
+        };
+        return transaction ? this.transaction(apply) : apply();
+    }
+    listCampaigns(groupId: string, editionId: string): Campaign[] {
+        return this.db.prepare('SELECT id FROM mail_campaigns WHERE group_id=? AND edition_id=? ORDER BY rowid').all(groupId, editionId)
+            .map(row => this.readCampaign(groupId, editionId, row.id as string));
+    }
+    readCampaign(groupId: string, editionId: string, id: string): Campaign {
+        const row = this.db.prepare('SELECT * FROM mail_campaigns WHERE group_id=? AND edition_id=? AND id=?').get(groupId, editionId, id);
+        if (!row) throw new Error('Campaign not found');
+        this.validateId(id); this.validateId(row.revision as string);
+        if (!Number.isFinite(Date.parse(row.created_at as string)) || !['test','production'].includes(row.mode as string)) throw new Error('Invalid campaign');
+        const state = this.readState(groupId, editionId);
+        const deliveries = Object.fromEntries(this.db.prepare('SELECT giver,status FROM campaign_deliveries WHERE campaign_id=?').all(id).map(r => [r.giver, r.status]));
+        validateState({ ...state, draw: state.draw ? { ...state.draw, deliveries } : null });
+        if (!state.draw || Object.keys(deliveries).length !== state.participants.length) throw new Error('Invalid campaign participants');
+        return { id, groupId, editionId, createdAt: row.created_at as string, mode: row.mode as 'test' | 'production', revision: row.revision as string, deliveries };
+    }
+    // Runs inside the same transaction as the reminder reservation.
+    private createCampaign({ groupId, editionId }: EditionScope, mode: MailOperation['mode'], createdAt: string, drawRevision: string) {
+        const state = this.readState(groupId, editionId);
+        if (!state.draw) throw new Error('Confirmed draw required');
+        const id = randomUUID();
+        this.db.prepare('INSERT INTO mail_campaigns VALUES (?, ?, ?, ?, ?, ?)').run(id, groupId, editionId, createdAt, mode, randomUUID());
+        for (const p of state.participants) this.db.prepare("INSERT INTO campaign_deliveries VALUES (?, ?, 'pending')").run(id, p.id);
+        this.db.prepare('UPDATE draw SET revision=? WHERE group_id=? AND edition_id=?').run(drawRevision, groupId, editionId);
+        return id;
+    }
+    mailOperation({ groupId, editionId }: EditionScope): MailOperation | undefined {
+        const row = this.db.prepare(`SELECT id, mode, kind, campaign_id AS campaignId, status, total, processed
+            FROM mail_operations WHERE group_id=? AND edition_id=?`).get(groupId, editionId);
+        if (!row) return undefined;
+        return { ...row, campaignId: row.campaignId ?? undefined } as unknown as MailOperation;
+    }
+    reserveMailOperation(scope: EditionScope, operation: MailOperation, now: string) {
+        this.transaction(() => {
+            if (operation.kind === 'reminder') {
+                operation.campaignId = this.createCampaign(scope, operation.mode, now, operation.id);
+            } else if (operation.campaignId) {
+                this.db.prepare('UPDATE mail_campaigns SET revision=? WHERE id=?').run(operation.id, operation.campaignId);
+            } else {
+                this.db.prepare('UPDATE draw SET revision=? WHERE group_id=? AND edition_id=?').run(operation.id, scope.groupId, scope.editionId);
+            }
+            this.db.prepare('INSERT OR REPLACE INTO mail_operations VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)').run(
+                scope.groupId, scope.editionId, operation.id, operation.mode, operation.kind, operation.campaignId ?? null, operation.status, operation.total);
+        });
+    }
+    recordMailAttempt(scope: EditionScope, operation: MailOperation, giver: string, status: Delivery, completed: boolean) {
+        this.transaction(() => {
+            const { groupId, editionId } = scope;
+            const reservation = this.mailOperation(scope);
+            if (reservation?.id !== operation.id || reservation.status !== 'running') throw new Error('Mail operation unavailable');
+            const updated = operation.campaignId
+                ? this.db.prepare('UPDATE campaign_deliveries SET status=? WHERE campaign_id=? AND giver=?').run(status, operation.campaignId, giver)
+                : this.db.prepare(`UPDATE assignments SET ${operation.mode === 'test' ? 'test_status' : 'status'}=?
+                    WHERE group_id=? AND edition_id=? AND giver=?`).run(status, groupId, editionId, giver);
+            if (updated.changes !== 1) throw new Error('Mail assignment unavailable');
+            if (completed) this.db.prepare('UPDATE mail_operations SET processed=processed+1 WHERE id=?').run(operation.id);
+        });
+    }
+    finishMailOperation(id: string, status: Exclude<MailOperation['status'], 'running'>) {
+        this.db.prepare("UPDATE mail_operations SET status=? WHERE id=? AND status='running'").run(status, id);
+    }
+    /** Caller must hold storageLock(path), shared with web mutations and mail reservations. */
     importLegacy(input: unknown, planInput: unknown, max = 15, confirmation?: string) {
         return this.transaction(() => {
-            if (this.db.prepare('PRAGMA user_version').get()!.user_version !== 4) throw new ImportError('La importación requiere SQLite v4.');
+            if (this.db.prepare('PRAGMA user_version').get()!.user_version !== 6) throw new ImportError('La importación requiere SQLite v6.');
             if (!Number.isInteger(max) || max < 2 || max > 100) throw new ImportError('Límite de participantes incorrecto.');
             const records = parseLegacy(input), plan = parseImportPlan(planInput, records.length);
             const groups = this.listGroups(), target = plan.target;
@@ -489,4 +613,14 @@ export class EncryptedDatabase {
         }, confirmation !== undefined);
     }
     close() { this.db.close(); this.key.fill(0); }
+}
+
+export interface EditionOptions {
+    previousIds?: Record<string, string | null>;
+    schedule?: Schedule;
+    prepare?: (state: State, restrictions: Record<string, string | null>) => State;
+}
+export interface Campaign {
+    id: string; groupId: string; editionId: string; mode: 'test' | 'production'; createdAt: string; revision: string;
+    deliveries: Record<string, import('../domain/editions').Delivery>;
 }

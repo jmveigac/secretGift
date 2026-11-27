@@ -1,21 +1,23 @@
+import { useMailProgress } from './MailProgress';
 import { useEffect, useRef, useState } from 'react';
 import { editionApi, type EditionScope, type Person, type Participant, type ParticipantInput, type StateResponse } from './api';
 import ParticipantList from './ParticipantList';
 import ParticipantForm from './ParticipantForm';
 import DrawPanel from './DrawPanel';
 
-interface Props { scope?: EditionScope; people?: Person[]; groupRevision?: string; blocked?: boolean; onBusy?: (busy: boolean) => void; onChanged?: (state: StateResponse) => Promise<void> }
-export default function EditionPanel({ scope, people = [], groupRevision, blocked = false, onBusy, onChanged }: Props) {
+interface Props { requireSchedule?: boolean; scope?: EditionScope; people?: Person[]; groupRevision?: string; blocked?: boolean; onBusy?: (busy: boolean) => void; onChanged?: (state: StateResponse) => Promise<void> }
+export default function EditionPanel({ requireSchedule = false, scope, people = [], groupRevision, blocked = false, onBusy, onChanged }: Props) {
     const [state, setState] = useState<StateResponse | null>(null);
     const [editing, setEditing] = useState<Participant | null>(null);
     const [formVersion, setFormVersion] = useState(0);
     const [pending, setPending] = useState(true);
     const [sending, setSending] = useState(false);
     const [error, setError] = useState('');
-    const [notice, setNotice] = useState('');
+    const [pollError, setPollError] = useState('');
     const inFlight = useRef(false);
     const [personId, setPersonId] = useState('');
 
+    useMailProgress(scope, state, setState, setPollError);
     const api = editionApi(scope, state?.revision, groupRevision);
     useEffect(() => {
         onBusy?.(pending || sending);
@@ -43,7 +45,6 @@ export default function EditionPanel({ scope, people = [], groupRevision, blocke
         inFlight.current = true;
         setPending(true);
         setError('');
-        setNotice('');
         try {
             const next = await operation();
             setState(next);
@@ -68,6 +69,7 @@ export default function EditionPanel({ scope, people = [], groupRevision, blocke
         }
     }
     function draw() {
+        if (requireSchedule && !state?.schedule) { setError('Guarda una fecha de revelación antes de confirmar el sorteo.'); return; }
         if (!pending && !blocked && window.confirm('¿Realizar el sorteo con la lista y restricciones actuales? Quedará bloqueado hasta reiniciarlo. No se enviarán correos.')) {
             void mutate(api.draw);
         }
@@ -92,7 +94,7 @@ export default function EditionPanel({ scope, people = [], groupRevision, blocke
                 setSending(true);
                 try { return await api.send(drawId, delivery.revision, retryUncertain); }
                 finally { setSending(false); }
-            }).then(completed => { if (completed) setNotice('Solicitud de envío completada. Revisa los contadores; aceptación SMTP no confirma recepción.'); });
+            });
         }
     }
 
@@ -106,7 +108,7 @@ export default function EditionPanel({ scope, people = [], groupRevision, blocke
     return <section aria-label="Edición seleccionada">
         <p role="status" aria-live="polite">{pending ? state ? 'Guardando cambios…' : 'Cargando datos…' : ''}</p>
         {error && <p role="alert">{error}</p>}
-        {notice && <p role="status">{notice}</p>}
+        {pollError && <p role="alert">{pollError}</p>}
         {state && <>
             {scope && <fieldset disabled={pending || blocked || locked || !!state.delivery?.active || state.participants.length >= state.maxParticipants}>
                 <label htmlFor="edition-person">Añadir persona activa del grupo a esta edición</label>
@@ -121,7 +123,7 @@ export default function EditionPanel({ scope, people = [], groupRevision, blocke
             <ParticipantForm key={formVersion} participant={editing} participants={state.participants}
                 disabled={pending || blocked || !!state.delivery?.active || locked || (!editing && state.participants.length >= state.maxParticipants)}
                 onSave={save} onCancel={clearForm} />
-            <DrawPanel state={state} pending={pending || blocked} sending={sending} onDraw={draw} onReset={reset} onSend={send} onRefresh={() => { void mutate(api.state, true); }} />
+            <DrawPanel drawBlocked={requireSchedule && !state.schedule} state={state} pending={pending || blocked} sending={sending} onDraw={draw} onReset={reset} onSend={send} onRefresh={() => { void mutate(api.state, true); }} />
         </>}
     </section>;
 }

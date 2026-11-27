@@ -1,3 +1,4 @@
+const { waitForMail } = require('./helpers/mail-progress.cjs');
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs/promises');
@@ -10,7 +11,7 @@ const {LocalStore}=require('../build/web/store');
 const {EncryptedDatabase}=require('../build/web/database');
 const {createApp}=require('../build/web/app');
 const {sendMail}=require('../build/sendMail');
-const env={HOST:'smtp.example.invalid',FROM:'"Organizer" <sender@example.invalid>',PORT:'587',MAILUSER:'synthetic',MAILPWD:'synthetic'};
+const env={SMTP_SEND_INTERVAL_MS:"0",HOST:'smtp.example.invalid',FROM:'"Organizer" <sender@example.invalid>',PORT:'587',MAILUSER:'synthetic',MAILPWD:'synthetic'};
 const payload=s=>({confirm:true,drawId:s.draw.completedAt,revision:s.delivery.revision,expectedRevision:s.revision});
 async function fixture(mail){
  await fs.mkdir('.task/tests',{recursive:true});const dir=await fs.mkdtemp(path.resolve('.task/tests/modes-'));
@@ -55,7 +56,7 @@ test('four independent tests preserve contacts, assignments and production state
   const config={...env,APP_MODE:'test',TEST_EMAIL:'test@example.invalid'};
   const f=await fixture(smtpSender(config));const before=await f.read();const first=payload(await f.store.status());
   const app=createApp(f.store);const call=p=>app.fetch(new Request('http://localhost/api/draw/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)}));
-  assert.equal((await call(first)).status,200);assert.equal(messages.length,4);
+  assert.equal((await call(first)).status,202);await waitForMail(()=>f.store.status());assert.equal(messages.length,4);
   for(let i=0;i<4;i++){
    const a=before.draw.assignments[i];const giver=before.participants.find(p=>p.id===a.giver),receiver=before.participants.find(p=>p.id===a.receiver);
    assert.equal(messages[i].to,config.TEST_EMAIL);assert.deepEqual(messages[i].envelope.to,[config.TEST_EMAIL]);assert.ok(messages[i].text.includes(giver.name));assert.ok(messages[i].text.includes(receiver.name));
@@ -87,13 +88,13 @@ test('test rejections and connection uncertainty survive restart, retries stay r
 });
 test('v3 to v4 migration preserves original key, assignments and historical production states, and rolls back on failure',async()=>{
  const f=await fixture({configured:true,send:async()=> 'accepted'});await f.store.send(payload(await f.store.status()));const before=await f.read(),key=await fs.readFile(f.key);
- let db=new DatabaseSync(f.file);db.exec('ALTER TABLE assignments DROP COLUMN test_status; PRAGMA user_version=3;');db.close();
+ let db=new DatabaseSync(f.file);db.exec('DROP TABLE mail_operations; ALTER TABLE assignments DROP COLUMN test_status; PRAGMA user_version=3;');db.close();
  const bytes=await fs.readFile(f.file),exec=DatabaseSync.prototype.exec;
  DatabaseSync.prototype.exec=function(sql){if(sql==='PRAGMA user_version=4')throw new Error('Synthetic migration failure');return exec.call(this,sql);};
  try{await assert.rejects(f.open(),/Synthetic migration failure/);}finally{DatabaseSync.prototype.exec=exec;}
  assert.deepEqual(await fs.readFile(f.file),bytes);assert.deepEqual(await fs.readFile(f.key),key);
  db=await f.open();try{assert.deepEqual(db.read(),before);}finally{db.close();}
- db=new DatabaseSync(f.file);try{assert.equal(db.prepare('PRAGMA user_version').get().user_version,4);assert.equal(db.prepare("SELECT COUNT(*) n FROM assignments WHERE test_status='pending' AND status='accepted'").get().n,4);}finally{db.close();}
+ db=new DatabaseSync(f.file);try{assert.equal(db.prepare('PRAGMA user_version').get().user_version,6);assert.equal(db.prepare("SELECT COUNT(*) n FROM assignments WHERE test_status='pending' AND status='accepted'").get().n,4);}finally{db.close();}
 });
 test('legacy CLI uses the same recipient boundary, including resends, without exposing transport errors',async()=>{
  const previous={...process.env};
@@ -113,9 +114,9 @@ test('an interrupted test send persists uncertainty before SMTP and blocks concu
  await assert.rejects(f.store.send(input),e=>e.status===409);
 });
 test('storage failure after a simulated test acceptance leaves only the test delivery uncertain after restart',async()=>{
- const original=EncryptedDatabase.prototype.write;
- const f=await fixture({mode:'test',configured:true,send:async()=>{EncryptedDatabase.prototype.write=()=>{throw new Error('Synthetic storage failure');};return 'accepted';}});
- try{await assert.rejects(f.store.send(payload(await f.store.status())),/Synthetic storage failure/);}finally{EncryptedDatabase.prototype.write=original;}
+ const original=EncryptedDatabase.prototype.recordMailAttempt;
+ const f=await fixture({mode:'test',configured:true,send:async()=>{EncryptedDatabase.prototype.recordMailAttempt=()=>{throw new Error('Synthetic storage failure');};return 'accepted';}});
+ try{await assert.rejects(f.store.send(payload(await f.store.status())),/Synthetic storage failure/);}finally{EncryptedDatabase.prototype.recordMailAttempt=original;}
  const restarted=new LocalStore(f.file,15,{mode:'test',configured:true,send:async()=>assert.fail('must not send automatically')});const s=await restarted.status();
  assert.equal(s.delivery.uncertain,1);assert.equal(s.delivery.pending,3);assert.equal(s.delivery.accepted,0);assert.equal(s.delivery.production.pending,4);
 });

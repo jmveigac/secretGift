@@ -12,3 +12,6 @@ data/
 keys/
 
 !.env.example
+
+# Comprobaciones visuales locales
+.taste-skill/

@@ -1,10 +1,10 @@
-import type { ParticipantInput, StateResponse, Group, GroupResponse, EditionScope } from '../../src/web/contracts';
-export type { Participant, ParticipantInput, StateResponse, Group, GroupResponse, Person, EditionScope } from '../../src/web/contracts';
+import type { ParticipantInput, StateResponse, Group, GroupResponse, EditionScope, ResultsResponse, RestrictionPreview } from '../../src/web/contracts';
+export type { Participant, ParticipantInput, StateResponse, Group, GroupResponse, Person, EditionScope, EditionSummary, CampaignSummary, DeliveryCounts, ResultsResponse, RestrictionPreview } from '../../src/web/contracts';
 
-async function request<T = StateResponse>(path: string, method = 'GET', body?: unknown): Promise<T> {
+async function request<T = StateResponse>(path: string, method = 'GET', body?: unknown, signal?: AbortSignal): Promise<T> {
     const response = await fetch(path, {
         method,
-        cache: 'no-store',
+        cache: 'no-store', signal,
         headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
         body: body === undefined ? undefined : JSON.stringify(body),
     });
@@ -14,7 +14,7 @@ async function request<T = StateResponse>(path: string, method = 'GET', body?: u
 }
 
 export const api = {
-    state: () => request('/api/state'),
+    state: (signal?: AbortSignal) => request('/api/state', 'GET', undefined, signal),
     save: (participant: ParticipantInput, id?: string) =>
         request(`/api/participants${id ? `/${id}` : ''}`, id ? 'PUT' : 'POST', participant),
     remove: (id: string) => request(`/api/participants/${id}`, 'DELETE', {}),
@@ -38,7 +38,7 @@ export function editionApi(scope?: EditionScope, expectedRevision?: string, expe
     const base = `/api/groups/${scope.groupId}/editions/${scope.editionId}`;
     const write = (path: string, method: string, body: object) => request(base + path, method, { ...body, expectedRevision });
     return {
-        state: () => request(base),
+        state: (signal?: AbortSignal) => request(base, 'GET', undefined, signal),
         addPerson: (personId: string) => write('/participants', 'POST', { personId, expectedGroupRevision }),
         save: (participant: ParticipantInput, id?: string) => write(`/participants${id ? `/${id}` : ''}`, id ? 'PUT' : 'POST', participant),
         remove: (id: string) => write(`/participants/${id}`, 'DELETE', {}),
@@ -47,3 +47,21 @@ export function editionApi(scope?: EditionScope, expectedRevision?: string, expe
         reset: () => write('/draw/reset', 'POST', { confirm: true }),
     };
 }
+
+export interface GuidedInput {
+    name: string; year: number; personIds: string[]; previousIds: Record<string, string | null>;
+    schedule: { localDateTime: string; timeZone: string }; confirmDraw: true; referenceEditionId?: string;
+}
+export const workflowApi = {
+    preview: (group: GroupResponse, personIds: string[], previousIds: Record<string, string | null>, schedule?: GuidedInput['schedule']) =>
+        request<RestrictionPreview>(`/api/groups/${group.group.id}/preview`, 'POST', { expectedRevision: group.revision, personIds, previousIds, schedule }),
+    create: (group: GroupResponse, input: GuidedInput) => request<GroupResponse>(`/api/groups/${group.group.id}/editions`, 'POST', { ...input, expectedRevision: group.revision }),
+    results: (scope: EditionScope) => request<ResultsResponse>(`/api/groups/${scope.groupId}/editions/${scope.editionId}/results`),
+    reminder: (scope: EditionScope, state: StateResponse, campaign?: { id: string; revision: string }, retryUncertain = false) =>
+        request(`/api/groups/${scope.groupId}/editions/${scope.editionId}/reminders${campaign ? `/${campaign.id}/send` : ''}`, 'POST', {
+            confirm: true, drawId: state.draw.completed ? state.draw.completedAt : '', expectedRevision: state.revision,
+            revision: campaign?.revision ?? state.delivery?.revision, retryUncertain,
+        }),
+    configure: (scope: EditionScope, state: StateResponse, name: string, schedule: GuidedInput['schedule']) =>
+        request(`/api/groups/${scope.groupId}/editions/${scope.editionId}`, 'PUT', { expectedRevision: state.revision, name, schedule }),
+};

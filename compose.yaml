@@ -10,6 +10,7 @@ services:
       HOST: ${HOST:-}
       PORT: ${PORT:-}
       MAILUSER: ${MAILUSER:-}
+      SMTP_SEND_INTERVAL_MS: ${SMTP_SEND_INTERVAL_MS-10000}
       MAILPWD: ${MAILPWD:-}
       MAX_PARTICIPANTS: ${MAX_PARTICIPANTS:-15}
     volumes:

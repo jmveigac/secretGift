@@ -1,3 +1,4 @@
+const { waitForMail } = require('./helpers/mail-progress.cjs');
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs/promises');
@@ -92,7 +93,7 @@ test('scoped participant form preserves identities, rejects stale changes and re
  const check=await f.open();try{assert.deepEqual(check.readEdition(g.group.id,id),privateState);}finally{check.close();}
  const all=await f.get(g.group.id);assert.equal(all.editions.length,2);
 });
-test('scoped SMTP retains acceptance, uncertainty, revisions and storage-wide exclusion during sends',{timeout:15000},async()=>{
+test('scoped SMTP retains acceptance, uncertainty, revisions and edition-level exclusion during sends',{timeout:15000},async()=>{
  let resume,started;const ready=new Promise(r=>started=r),wait=new Promise(r=>resume=r);const sent=[];
  const f=await setup({configured:true,send:async m=>{sent.push(m);if(sent.length===1){started();await wait;return 'accepted';}return sent.length===2?'uncertain':'accepted';}});
  let a=await f.create('A'),b=await f.create('B');for(const n of ['Ana','Bea','Cora'])a=await f.add(a,n);
@@ -100,20 +101,20 @@ test('scoped SMTP retains acceptance, uncertainty, revisions and storage-wide ex
  let s=await f.state(a,id);s=(await f.write(a,id,s,'/draw',{confirm:true})).data;
  assert.equal((await f.write(a,id,s,'/draw/send',{confirm:false,drawId:s.draw.completedAt,revision:s.delivery.revision})).status,400);
  const input={confirm:true,drawId:s.draw.completedAt,revision:s.delivery.revision};
- const sending=f.write(a,id,s,'/draw/send',input);await ready;
+ const sending=await f.write(a,id,s,'/draw/send',input);assert.equal(sending.status,202);assert.equal(sending.data.mailOperation.total,3);await ready;
  try{
-  assert.equal((await f.manage(b,'/people','POST',{name:'Blocked',email:'blocked@example.invalid'})).status,409);
+  assert.equal((await f.manage(b,'/people','POST',{name:'Independent',email:'independent@example.invalid'})).status,201);
   assert.equal((await f.write(a,id,s,'/draw/reset',{confirm:true})).status,409);
   assert.equal((await f.write(a,id,s,'/draw/send',input)).status,409);
   assert.equal((await f.state(a,id)).delivery.active,true);
-  assert.equal((await f.get(b.group.id)).busy,true);
+  assert.equal((await f.get(b.group.id)).busy,false);
  }finally{resume();}
- const result=await sending;assert.equal(result.status,200);s=result.data;assert.equal(s.delivery.accepted,2);assert.equal(s.delivery.uncertain,1);
+ s=await waitForMail(()=>f.state(a,id));assert.equal(s.delivery.accepted,2);assert.equal(s.delivery.uncertain,1);
  assert.equal((await f.write(a,id,s,'/draw/send',input)).status,409);assert.equal(sent.length,3);
  f.restart();s=await f.state(a,id);
- s=(await f.write(a,id,s,'/draw/send',{confirm:true,drawId:s.draw.completedAt,revision:s.delivery.revision})).data;assert.equal(sent.length,3);
+ s=(await f.write(a,id,s,'/draw/send',{confirm:true,drawId:s.draw.completedAt,revision:s.delivery.revision})).data;s=await waitForMail(()=>f.state(a,id));assert.equal(sent.length,3);
  s=(await f.write(a,id,s,'/draw/send',{confirm:true,drawId:s.draw.completedAt,revision:s.delivery.revision,retryUncertain:true})).data;
- assert.equal(sent.length,4);assert.equal(s.delivery.accepted,3);
+ s=await waitForMail(()=>f.state(a,id));assert.equal(sent.length,4);assert.equal(s.delivery.accepted,3);
 });
 test('scoped new identities roll back with their participation and concurrent stale writers cannot both succeed',async()=>{
  const f=await setup();let g=await f.create('Atómico');g=await f.edition(g,'Preparación',[]);const id=g.editions[0].edition.id;
@@ -127,15 +128,15 @@ test('scoped new identities roll back with their participation and concurrent st
  const results=await Promise.all(['Bea','Cora'].map(name=>f.write(g,id,s,'/participants',{name,email:name.toLowerCase()+'@example.invalid',previousId:null})));
  assert.deepEqual(results.map(r=>r.status).sort(),[201,409]);
  assert.equal((await f.state(g,id)).participants.length,2);assert.equal((await f.get(g.group.id)).people.length,2);
- sql=new DatabaseSync(f.file);try{assert.equal(sql.prepare('PRAGMA user_version').get().user_version,4);}finally{sql.close();}
+ sql=new DatabaseSync(f.file);try{assert.equal(sql.prepare('PRAGMA user_version').get().user_version,6);}finally{sql.close();}
 });
 test('a scoped persistence failure after SMTP acceptance retains uncertainty and releases the lock',async()=>{
- const original=EncryptedDatabase.prototype.writeEdition;
- const f=await setup({configured:true,send:async()=>{EncryptedDatabase.prototype.writeEdition=function(){throw new Error('synthetic private persistence failure');};return 'accepted';}});
+ const original=EncryptedDatabase.prototype.recordMailAttempt;
+ const f=await setup({configured:true,send:async()=>{EncryptedDatabase.prototype.recordMailAttempt=function(){throw new Error('synthetic private persistence failure');};return 'accepted';}});
  let g=await f.create('Fallo seguro');g=await f.add(g,'Ana');g=await f.add(g,'Bea');g=await f.edition(g,'Prueba');const id=g.editions[0].edition.id;
  let s=await f.state(g,id);s=(await f.write(g,id,s,'/draw',{confirm:true})).data;
- try{assert.equal((await f.write(g,id,s,'/draw/send',{confirm:true,drawId:s.draw.completedAt,revision:s.delivery.revision})).status,503);}
- finally{EncryptedDatabase.prototype.writeEdition=original;}
+ try{assert.equal((await f.write(g,id,s,'/draw/send',{confirm:true,drawId:s.draw.completedAt,revision:s.delivery.revision})).status,202);s=await waitForMail(()=>f.state(g,id));assert.equal(s.mailOperation.status,'interrupted');}
+ finally{EncryptedDatabase.prototype.recordMailAttempt=original;}
  f.restart();s=await f.state(g,id);assert.equal(s.delivery.uncertain,1);assert.equal(s.delivery.pending,1);assert.equal(s.delivery.accepted,0);
  g=await f.get(g.group.id);assert.equal((await f.manage(g,'','PUT',{name:'Recuperado'})).status,200);
 });

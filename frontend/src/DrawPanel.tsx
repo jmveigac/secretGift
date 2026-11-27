@@ -1,7 +1,9 @@
+import MailProgress from './MailProgress';
 import type { StateResponse } from './api';
 
 interface Props {
     state: StateResponse;
+    drawBlocked?: boolean;
     pending: boolean;
     sending: boolean;
     onDraw: () => void;
@@ -9,7 +11,7 @@ interface Props {
     onSend: (retryUncertain?: boolean) => void;
     onRefresh: () => void;
 }
-export default function DrawPanel({ state, pending, sending, onDraw, onReset, onSend, onRefresh }: Props) {
+export default function DrawPanel({ drawBlocked = false, state, pending, sending, onDraw, onReset, onSend, onRefresh }: Props) {
     const delivery = state.delivery;
     const busy = pending || !!delivery?.active;
     return <section aria-labelledby="draw-title">
@@ -17,7 +19,7 @@ export default function DrawPanel({ state, pending, sending, onDraw, onReset, on
         <p>{state.draw.completed
             ? `Sorteo completado · ${state.draw.participantCount} participantes. Las asignaciones permanecen privadas.`
             : 'Pendiente. Nadie se regalará a sí mismo ni repetirá el destinatario anterior. Se aplicará el último antecedente verificado de cada persona en este grupo; sin él, su restricción manual. El historial privado no se muestra. La viabilidad se comprobará al realizar el sorteo.'}</p>
-        <button disabled={busy || state.draw.completed || state.participants.length < 2} onClick={onDraw}>Realizar sorteo</button>
+        <button disabled={drawBlocked || busy || state.draw.completed || state.participants.length < 2} onClick={onDraw}>Realizar sorteo</button>
         {state.draw.completed && <p>Fecha del sorteo: {new Date(state.draw.completedAt).toLocaleString('es-ES')}</p>}
         <button className="secondary" disabled={busy || !state.draw.completed} onClick={onReset}>Reiniciar sorteo</button>
         {state.draw.completed && delivery && <div>
@@ -29,6 +31,7 @@ export default function DrawPanel({ state, pending, sending, onDraw, onReset, on
             <p>{delivery.active || sending ? 'Envíos en curso.' : delivery.accepted === state.draw.participantCount ? 'Envíos completados: aceptados por SMTP.' : delivery.failed ? 'Hay envíos fallidos.' : delivery.uncertain ? 'Hay envíos con resultado incierto.' : 'Envíos pendientes.'}</p>
             <p>Aceptados: {delivery.accepted} · Pendientes: {delivery.pending} · Fallidos: {delivery.failed} · Inciertos: {delivery.uncertain}</p>
             <p>La aceptación por SMTP no confirma la llegada a la bandeja de entrada.</p>
+            <MailProgress state={state} />
             {!delivery.configured && <p role="alert">{delivery.configurationError ?? 'SMTP no está configurado. Configura las variables privadas y reinicia la aplicación.'}</p>}
             <button disabled={busy || !delivery.configured || delivery.pending + delivery.failed === 0} onClick={() => onSend()}>Enviar pendientes y fallidos</button>
             {delivery.uncertain > 0 && <>
@@ -36,6 +39,6 @@ export default function DrawPanel({ state, pending, sending, onDraw, onReset, on
                 <button disabled={busy || !delivery.configured} onClick={() => onSend(true)}>Reenviar también inciertos</button>
             </>}
         </div>}
-        <button className="secondary" disabled={pending} onClick={onRefresh}>Actualizar estado</button>
+        <button className="secondary" disabled={busy} onClick={onRefresh}>Actualizar estado</button>
     </section>;
 }

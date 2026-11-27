@@ -1,4 +1,4 @@
-# Modelo SQLite v4
+# Modelo SQLite v6
 
 `PRAGMA user_version` versiona el esquema; `State.version=1` sigue describiendo
 el estado de una edición; el contrato HTTP anterior sigue siendo compatible. Los tipos y su
@@ -68,7 +68,7 @@ si el volumen deja de ser pequeño y local.
 
 ## API de grupos y ediciones
 
-El esquema actual es v4; los sobres cifrados existentes no cambian. No hay selección global
+El esquema actual es v6; los sobres cifrados existentes no cambian. No hay selección global
 de grupo o edición en el servidor: cada operación nueva lleva ambos IDs en la URL.
 
 | Ruta | Operaciones |
@@ -92,8 +92,9 @@ directorio en una edición exige también `expectedGroupRevision`, para no copia
 un contacto que cambió desde su selección. Las respuestas de una escritura
 usan el estado persistido, incluidos los estados `pending` normalizados.
 
-Todos los escritores HTTP comparten el bloqueo de almacenamiento, incluido el
-directorio y otros grupos. Las lecturas durante SMTP no cambian el historial.
+Las mutaciones ordinarias y las reservas de envío comparten el bloqueo breve de
+almacenamiento. Las revisiones de grupo excluyen los contadores de correo para
+permitir cambios independientes durante los envíos.
 Los contactos son únicos entre personas activas del mismo grupo; los nombres de
 grupo son únicos y una edición no puede repetir nombre y año dentro de su grupo
 en las nuevas operaciones HTTP. Las comparaciones ignoran mayúsculas.
@@ -166,7 +167,7 @@ asignaciones, la instantánea de restricciones ni destinatarios históricos.
 `npm run import:cli -- --source ARCHIVO --plan PLAN [--data SQLITE] [--key CLAVE]`
 valida y devuelve solo contadores y un código HMAC. `--confirm CODIGO` confirma
 exactamente esa vista previa. `--help` muestra las opciones. No importa al arrancar
-la web. Requiere una instalación v4 existente: no inicializa ni migra bases.
+la web. Requiere una instalación v6 existente: no inicializa ni migra bases.
 Las rutas y `MAX_PARTICIPANTS` usan los valores habituales de la web; el límite
 por defecto es 15 participantes seleccionados (máximo configurable 100).
 
@@ -284,12 +285,12 @@ requiere repetirla. Los IDs nuevos se generan al preparar cada ejecución y solo
 se publican en SQLite durante la confirmación; no forman parte del token.
 
 El servicio adquiere `storageLock` antes de abrir la base, compartido con
-`LocalStore` y SMTP, y rechaza una operación mientras otro escritor o envío
-mantiene el bloqueo. El repositorio valida y publica personas, grupo, edición,
+las mutaciones de `LocalStore` y las reservas de envío. Un envío ya reservado
+puede continuar mientras se importa otro sorteo. El repositorio valida y publica personas, grupo, edición,
 asignaciones, secuencia y estados en una transacción `BEGIN IMMEDIATE`. Compara
 el estado releído con el preparado y comprueba claves foráneas antes de confirmar.
 La vista previa usa una transacción de lectura y no crea entidades. No cambia el
-esquema v4 ni la clave. Los errores pueden identificar índices de registro, pero no su contenido, contactos, parejas, rutas
+esquema v6 ni la clave. Los errores pueden identificar índices de registro, pero no su contenido, contactos, parejas, rutas
 privadas ni detalles de SQLite; los resúmenes solo contienen contadores, modo y
 el código de confirmación. Los endpoints públicos mantienen sus campos actuales.
 
@@ -336,3 +337,120 @@ actualiza el canal activo y comparte el bloqueo y revisión de la edición. Ante
 SMTP persiste `uncertain` en ese canal. La revisión pública de envío incorpora una
 sesión nueva por arranque para rechazar confirmaciones de una configuración anterior.
 No hay envío automático ni reinicio de estados al cambiar modo o buzón de pruebas.
+
+
+## Fechas, resultados y recordatorios (v5)
+
+La migración v4→v5 añade `editions.schedule` (BLOB AES-GCM nullable con AAD de
+la edición), `mail_campaigns` y `campaign_deliveries`. Todo ocurre en una
+transacción: autentica y valida antes/después, comprueba las instantáneas y solo
+entonces fija `user_version=5`. Un fallo revierte el DDL y la versión. No reescribe
+los sobres existentes ni cambia claves, identidades, asignaciones, secuencias o
+estados SMTP originales. Los pasos v1→v4 siguen disponibles. Para volver a un
+programa anterior restaura una copia compatible de su base y clave.
+
+`Schedule` guarda la hora local, zona IANA, `eventAt` UTC y `revealAt` UTC como
+conceptos separados; la creación actual fija ambos instantes iguales. El resolutor
+usa `Intl` del servidor para buscar los instantes compatibles con la hora local.
+Rechaza fechas inválidas, huecos y solapamientos de horario en vez de escoger un
+instante implícito. La configuración HTTP solo acepta hora local y zona: no permite
+imponer un `revealAt` distinto. La actualización de metadatos comprueba que no hay
+sorteo confirmado; una vez confirmado no existe escritura ordinaria de su fecha.
+Las revisiones optimistas incluyen los metadatos de la edición.
+
+Las ediciones migradas, importadas o creadas por la API antigua sin fecha conservan
+`schedule=NULL`. Sus resultados nunca se revelan automáticamente. Una futura
+regularización exigiría una operación de mantenimiento explícita, con revisión,
+registro de la decisión y una fecha real autorizada antes de permitir consultas;
+no se puede inferir del año ni reutilizar la edición ordinaria. Esa operación no
+está implementada. La API heredada conserva el envío, sin habilitar resultados
+para esas ediciones; la CLI mantiene sus archivos y operación fuera de la API web.
+
+Las respuestas generales solo contienen disponibilidad y fecha, nunca parejas ni
+exclusiones verificadas. `LocalStore.results` comprueba confirmación, ámbito y
+fecha persistida usando su reloj inyectable; devuelve las parejas solo cuando
+`now >= revealAt`. Los resultados incluyen IDs y nombres de las instantáneas, sin
+correos. También se comprueba en HEAD y todas las respuestas llevan `no-store`.
+Los correos individuales mantienen el acceso interno necesario antes de la fecha.
+Esto limita las consultas web, no protege frente a un administrador con acceso a
+la clave, al proceso o al reloj del sistema.
+
+El asistente reutiliza `previousId` por persona en la nueva instantánea. No crea
+historial artificial. La comprobación reutiliza `previousRecipients` y
+`effectiveRestrictions`; para los antecedentes verificados solo publica su fuente, nunca el ID ni la presencia del destinatario verificado en la selección. El
+alta y confirmación guiadas se ejecutan juntas en la transacción de `createEdition`;
+se reutilizan el algoritmo, confirmación histórica y asignación de secuencia. Si
+no hay solución, se revierte también la nueva edición. La repetición pasa por
+`forkEdition` con los datos revisados, conservando su comportamiento heredado.
+
+### Endpoints
+
+Todos mantienen la validación de autoridad local, origen, JSON y límite de cuerpo.
+El límite pasa a 16 KiB para admitir hasta 100 participantes y antecedentes en
+una petición; el máximo funcional sigue siendo `MAX_PARTICIPANTS`.
+
+- `POST /api/groups/:group/preview`: `expectedRevision`, `personIds`, `previousIds`
+  opcional y `schedule` opcional (`localDateTime`, `timeZone`). Devuelve viabilidad,
+  fuente de restricciones y fecha normalizada, sin generar ni persistir un sorteo.
+- `POST /api/groups/:group/editions`: conserva el contrato anterior; admite además
+  `previousIds`, `schedule`, `confirmDraw:true` y `referenceEditionId` opcional.
+  La confirmación guiada exige fecha, no envía correo y devuelve el grupo actualizado.
+- `PUT /api/groups/:group/editions/:edition`: configura título y fecha de un borrador
+  con `expectedRevision`. Rechaza sorteos confirmados (409).
+- `GET|HEAD /api/groups/:group/editions/:edition/results`: 409 si no se confirmó;
+  403 antes de la fecha o sin ella; 200 con parejas a partir del instante persistido.
+- `POST /api/groups/:group/editions/:edition/reminders`: crea y envía una nueva
+  campaña a todos. Exige `confirm:true`, `drawId`, `expectedRevision` y la revisión
+  de entrega inicial. Esta revisión se consume al crear la campaña para rechazar
+  duplicados, incluso tras reinicio. No crea otra edición ni cambia su fecha.
+- `POST /api/groups/:group/editions/:edition/reminders/:campaign/send`: reintenta
+  pendientes/rechazados; requiere revisión de campaña, revisión de edición y la
+  misma confirmación. `retryUncertain:true` autoriza incluir inciertos. Aceptados
+  se omiten. Rechaza campañas de otro ámbito (404) o modo (409).
+
+Cada campaña guarda ID, ámbito, fecha, modo y revisión; sus estados individuales
+se almacenan por ID de persona sin duplicar direcciones o asignaciones. Referencia
+las instantáneas originales. Sus estados no reemplazan `status` ni `test_status`
+y permanecen al actualizar esos estados o crear otra campaña. El estado público
+de edición añade resúmenes `campaigns`, sin información de parejas.
+
+## Progreso de correo (v6)
+
+La migración v5→v6 crea `mail_operations` y actualiza `user_version` dentro de una
+transacción. Conserva el cifrado, la clave, las ediciones y los estados existentes.
+Guarda una reserva y un resumen de la última operación por edición, con ID, tipo,
+modo, campaña opcional, estado general y contadores de intentos. Los estados
+individuales siguen en `assignments` o `campaign_deliveries`. Para volver a la
+versión anterior, restaura la base v5 y su clave desde una copia compatible.
+
+Los POST de envío inicial (incluido `/api/draw/send`), recordatorio y reintento
+devuelven **202** con el estado de edición y `mailOperation` tras confirmar la
+reserva en SQLite. La creación de campaña y el consumo de la revisión se
+confirman en esa misma transacción. La revisión de sesión SMTP rechaza
+confirmaciones de otra configuración o arranque. Los GET de estado consultan
+la misma operación y los contadores existentes, y mantienen el control temporal
+de las asignaciones. `processed` cuenta intentos con resultado persistido en
+esa operación, incluidos rechazos e inciertos.
+
+Un bloqueo del sistema operativo por ruta SQLite y edición protege la operación
+hasta su cierre y se libera al terminar el proceso. Deja disponibles las lecturas
+y las escrituras independientes. El bloqueo breve de mutaciones no se mantiene
+durante SMTP. Tampoco se mantiene una transacción SQLite durante SMTP ni durante
+la espera. La capa SMTP común serializa todos los intentos del proceso, mide el
+intervalo con un reloj monotónico desde el cierre del transporte y mantiene la
+redirección de cabecera y sobre en pruebas. Procesos web y CLI independientes
+pueden abrir conexiones simultáneas, incluso con la misma cuenta SMTP.
+
+La espera sucede antes de persistir el siguiente intento como `uncertain`. El
+resultado y el avance se actualizan juntos. Si el proceso cae, la ausencia del
+bloqueo permite clasificar la reserva como interrumpida. Los mensajes aceptados
+se omiten al continuar, los pendientes se conservan y los inciertos requieren
+confirmación adicional. Una respuesta inequívoca de limitación detiene la
+operación. La aplicación no reanuda ni reintenta SMTP automáticamente.
+
+El 27 de noviembre de 2026, una prueba aislada con dos participantes ficticios
+registró 10.001,1 ms entre envíos, dos conexiones y dos respuestas SMTP 250.
+El organizador confirmó la recepción de ambos mensajes. El intervalo de diez
+segundos es una elección operativa basada en la prueba. La causa original de la
+incidencia sigue sin demostrarse y el proveedor no publicó ese intervalo como
+requisito para la operación observada.

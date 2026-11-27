@@ -1,10 +1,15 @@
-/** Public API contracts: current draw assignments must never be included here. */
+import type { Schedule } from '../domain/schedule';
+/** General responses never include assignments. Results are a separate, time-gated response. */
 import type { Participant } from '../domain/editions';
 import type { Group, Person, Edition } from '../domain/editions';
 export type { Group, Person, Edition } from '../domain/editions';
 export type { Participant } from '../domain/editions';
 export type ParticipantInput = Omit<Participant, 'id'>;
 export interface StateResponse {
+    schedule?: Schedule;
+    results?: { available: boolean; reason: 'scheduled' | 'missing-date' | 'unconfirmed' };
+    campaigns?: CampaignSummary[];
+    mailOperation?: MailOperation;
     scope?: EditionScope;
     revision?: string;
     delivery?: {
@@ -30,7 +35,7 @@ export interface StateResponse {
     };
 }
 export interface EditionScope { groupId: string; editionId: string }
-export interface EditionSummary { edition: Edition; draw: StateResponse['draw']; delivery: StateResponse['delivery'] }
+export interface EditionSummary { edition: Edition; draw: StateResponse['draw']; delivery: StateResponse['delivery']; results?: StateResponse['results'] }
 export interface GroupResponse {
     group: Group;
     people: Person[];
@@ -38,4 +43,19 @@ export interface GroupResponse {
     revision: string;
     maxParticipants: number;
     busy: boolean;
+}
+
+export interface DeliveryCounts { pending: number; accepted: number; failed: number; uncertain: number }
+export interface CampaignSummary extends DeliveryCounts { id: string; createdAt: string; mode: 'test' | 'production'; revision: string }
+export interface ResultsResponse { assignments: { giver: { id: string; name: string }; receiver: { id: string; name: string } }[] }
+export interface RestrictionPreview { schedule?: Schedule; viable: boolean; restrictions: { personId: string; source: 'verified' | 'manual' | 'none'; previousId?: string }[] }
+
+export interface MailOperation {
+    id: string;
+    mode: 'test' | 'production';
+    kind: 'initial' | 'reminder' | 'retryInitial' | 'retryReminder';
+    campaignId?: string;
+    status: 'running' | 'finished' | 'limited' | 'interrupted';
+    total: number;
+    processed: number;
 }
