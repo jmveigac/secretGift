@@ -52,7 +52,7 @@ export const createWebServer = (application = app) => createServer(async (reques
 if (require.main === module) {
     const host = process.env.WEB_HOST ?? '127.0.0.1';
     const server = createWebServer();
-    defaultStore.status().then(() => {
+    defaultStore.groups().then(() => {
         server.listen(8787, host, () => console.log(`secretGift: http://${host}:8787`));
     }).catch((error) => {
         console.error(error instanceof MissingDatabaseError

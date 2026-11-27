@@ -42,7 +42,8 @@ test('group and person management is scoped, validated, revision checked and per
  const id=a.people[0].id;assert.equal(a.people[0].active,false);
  r=await f.manage(a,'/people/'+id,'PUT',{name:'Ana nueva',email:'new@example.invalid',active:true});assert.equal(r.status,200);a=r.data;
  f.restart();assert.deepEqual(await f.get(a.group.id),a);assert.equal((await f.get(b.group.id)).people.length,0);
- assert.equal((await f.call('/api/groups/'+a.group.id,'DELETE',{})).status,405);
+ assert.equal((await f.call('/api/groups/'+a.group.id,'PATCH',{})).status,405);
+ assert.equal((await f.call('/api/groups/'+a.group.id,'DELETE',{})).status,400);
  assert.equal((await f.call('/api/groups/'+randomUUID())).status,404);
  assert.equal((await f.manage(a,'/people','POST',{name:'Bad',email:'bad'})).status,400);
  assert.equal((await f.call('/api/groups','POST',{name:'Blocked'},{Origin:'http://evil.invalid'})).status,403);

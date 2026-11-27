@@ -72,6 +72,16 @@ docker compose down
 El límite es de 15 participantes; puedes cambiarlo mediante `MAX_PARTICIPANTS`
 al arrancar Docker Compose.
 
+Para eliminar un grupo, abre **Mis grupos → Ajustes → Eliminar grupo**. Revisa
+el resumen y confirma escribiendo su nombre. Se eliminan las personas, ediciones,
+asignaciones y estados de correo del grupo, incluidos los recordatorios. Si hay
+un envío activo, espera a que termine. Al eliminar el último grupo puedes crear
+uno nuevo desde la lista.
+
+La eliminación es definitiva en la aplicación. Los correos enviados y las
+copias de seguridad existentes se conservan fuera de esta operación. SQLite
+puede reutilizar el espacio liberado en escrituras posteriores.
+
 ## Datos, migración y copias
 
 La web guarda SQLite en `/app/data/state.sqlite` (volumen `local-data`) y genera

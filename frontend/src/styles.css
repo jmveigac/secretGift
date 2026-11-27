@@ -192,3 +192,20 @@ td, th { text-align: left; padding: 12px; border-bottom: 1px solid #cbd5c1; over
 
 .mail-progress label { display: block; }
 .mail-progress progress { display: block; width: 100%; margin-block: .4rem; accent-color: currentColor; }
+
+.group-danger { margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+button.danger { background: #9c2424; color: #fff; border-color: transparent; }
+button.danger:hover:not(:disabled) { background: #7d1d1d; }
+.delete-group-dialog {
+  width: min(30rem, calc(100% - 2rem));
+  max-height: calc(100% - 2rem);
+  overflow: auto;
+  padding: clamp(1rem, 4vw, 1.75rem);
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  color: inherit;
+  background: var(--surface);
+}
+.delete-group-dialog::backdrop { background: rgb(25 15 25 / 55%); }
+.delete-group-dialog .actions { flex-wrap: wrap; margin-top: 1rem; }
+.delete-group-name { overflow-wrap: anywhere; }

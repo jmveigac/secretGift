@@ -6,12 +6,28 @@ import { randomBytes, randomUUID, createCipheriv, createDecipheriv, createHmac }
 import { storageLock } from './lock';
 import { validateState, type State, type Group, type Person, type Edition, type Delivery } from '../domain/editions';
 import { isDeepStrictEqual } from 'node:util';
-import type { EditionScope, MailOperation } from './contracts';
+import type { EditionScope, GroupDeletionSummary, MailOperation } from './contracts';
 import { ImportError, parseLegacy, parseImportPlan, prepareLegacyImport } from '../domain/legacy-import';
 
 export class MissingDatabaseError extends Error {
     constructor() { super('Storage database missing: restore the database with its original key'); }
 }
+
+export class NoCompatibilityError extends Error {}
+
+// Children precede their foreign-key parents. The same rows are bound to the confirmation.
+const groupDeletionTables = [
+    ['mail_operations', 'group_id=?'],
+    ['campaign_deliveries', 'campaign_id IN (SELECT id FROM mail_campaigns WHERE group_id=?)'],
+    ['mail_campaigns', 'group_id=?'],
+    ['compatibility', 'group_id=?'],
+    ['assignments', 'group_id=?'],
+    ['draw', 'group_id=?'],
+    ['participants', 'group_id=?'],
+    ['editions', 'group_id=?'],
+    ['people', 'group_id=?'],
+    ['groups', 'id=?'],
+] as const;
 
 // Only encrypted envelopes cross the SQLite boundary, including its journal/WAL.
 export class EncryptedDatabase {
@@ -160,7 +176,7 @@ export class EncryptedDatabase {
                 store.checkIntegrity();
                 store.authenticate();
                 store.validateAll();
-                validate(store.readCurrent());
+                if (store.compatibilityScope()) validate(store.readCurrent());
             }, false);
             if (!exists) {
                 db.close();
@@ -324,10 +340,15 @@ export class EncryptedDatabase {
             return this.listEditions(groupId).find(e => e.id === edition.id)!;
         });
     }
-    private current(): { groupId: string; editionId: string } {
+    private compatibilityScope(): EditionScope | undefined {
         const row = this.db.prepare('SELECT * FROM compatibility WHERE id=1').get();
-        if (!row) throw new Error('Missing compatibility edition');
+        if (!row) return undefined;
         return { groupId: row.group_id as string, editionId: row.edition_id as string };
+    }
+    private current(): EditionScope {
+        const scope = this.compatibilityScope();
+        if (!scope) throw new NoCompatibilityError();
+        return scope;
     }
     private readCurrent(): State {
         const { groupId, editionId } = this.current();
@@ -384,7 +405,7 @@ export class EncryptedDatabase {
             this.listPeople(group.id);
             for (const edition of this.listEditions(group.id)) this.readState(group.id, edition.id);
         }
-        this.readCurrent();
+        if (this.compatibilityScope()) this.readCurrent();
         if (this.db.prepare("SELECT 1 FROM sqlite_master WHERE name='mail_campaigns'").get()) {
             for (const row of this.db.prepare('SELECT * FROM mail_campaigns').all()) this.readCampaign(row.group_id as string, row.edition_id as string, row.id as string);
         }
@@ -485,8 +506,8 @@ export class EncryptedDatabase {
             while (editions.some(e => e.year === source.year && e.name.toLowerCase() === name.toLowerCase()));
             const next = this.insertEdition(groupId, name, source.year);
             this.replace(groupId, next.id, { ...state, draw: null });
-            const current = this.current();
-            if (current.groupId === groupId && current.editionId === editionId) this.db.prepare('UPDATE compatibility SET edition_id=? WHERE id=1').run(next.id);
+            const current = this.compatibilityScope();
+            if (current?.groupId === groupId && current.editionId === editionId) this.db.prepare('UPDATE compatibility SET edition_id=? WHERE id=1').run(next.id);
             return next;
         });
     }
@@ -542,6 +563,30 @@ export class EncryptedDatabase {
         for (const p of state.participants) this.db.prepare("INSERT INTO campaign_deliveries VALUES (?, ?, 'pending')").run(id, p.id);
         this.db.prepare('UPDATE draw SET revision=? WHERE group_id=? AND edition_id=?').run(drawRevision, groupId, editionId);
         return id;
+    }
+    private deletionSummary(groupId: string): GroupDeletionSummary | undefined {
+        const group = this.listGroups().find(entry => entry.id === groupId);
+        if (!group) return undefined;
+        const rows = Object.fromEntries(groupDeletionTables.map(([table, condition]) =>
+            [table, this.db.prepare(`SELECT * FROM ${table} WHERE ${condition} ORDER BY rowid`).all(groupId)]));
+        return { name: group.name, people: rows.people.length, editions: rows.editions.length,
+            campaigns: rows.mail_campaigns.length, revision: this.fingerprint(`delete-group:${groupId}`, rows) };
+    }
+    groupDeletionSummary(groupId: string) {
+        return this.transaction(() => this.deletionSummary(groupId), false);
+    }
+    runningMailEditions(groupId: string): EditionScope[] {
+        return this.db.prepare("SELECT edition_id FROM mail_operations WHERE group_id=? AND status='running'").all(groupId)
+            .map(row => ({ groupId, editionId: row.edition_id as string }));
+    }
+    deleteGroup(groupId: string, confirm: (summary: GroupDeletionSummary | undefined) => void) {
+        return this.transaction(() => {
+            confirm(this.deletionSummary(groupId));
+            for (const [table, condition] of groupDeletionTables) {
+                this.db.prepare(`DELETE FROM ${table} WHERE ${condition}`).run(groupId);
+            }
+            return { groups: this.listGroups() };
+        });
     }
     mailOperation({ groupId, editionId }: EditionScope): MailOperation | undefined {
         const row = this.db.prepare(`SELECT id, mode, kind, campaign_id AS campaignId, status, total, processed

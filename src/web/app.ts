@@ -1,4 +1,5 @@
 import { LocalStore, AppError } from './store';
+import { NoCompatibilityError } from './database';
 import { promises as fs } from 'node:fs';
 import { resolve } from 'node:path';
 import { assignmentContent } from './mail-template';
@@ -19,6 +20,7 @@ export const createApp = (store = new LocalStore()) => ({
             const preview = /^\/api\/groups\/([\da-f-]{36})\/preview$/.exec(path);
             const campaign = /^\/api\/groups\/([\da-f-]{36})\/editions\/([\da-f-]{36})\/reminders(?:\/([\da-f-]{36})\/send)?$/.exec(path);
             const results = /^\/api\/groups\/([\da-f-]{36})\/editions\/([\da-f-]{36})\/results$/.exec(path);
+            const deletion = /^\/api\/groups\/([\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12})\/deletion$/.exec(path);
             const group = /^\/api\/groups\/([\da-f-]{36})$/.exec(path);
             const people = /^\/api\/groups\/([\da-f-]{36})\/people(?:\/([\da-f-]{36}))?$/.exec(path);
             const editions = /^\/api\/groups\/([\da-f-]{36})\/editions$/.exec(path);
@@ -27,9 +29,9 @@ export const createApp = (store = new LocalStore()) => ({
             const scope = scoped ? { groupId: scopedGroupId, editionId } : undefined;
             let methods: string[] | null = null;
             if (preview || campaign) methods = ['POST'];
-            else if (results) methods = ['GET', 'HEAD'];
+            else if (results || deletion) methods = ['GET', 'HEAD'];
             else if (path === '/api/groups') methods = ['GET', 'HEAD', 'POST'];
-            else if (group) methods = ['GET', 'HEAD', 'PUT'];
+            else if (group) methods = ['GET', 'HEAD', 'PUT', 'DELETE'];
             else if (people) methods = people[2] ? ['PUT'] : ['POST'];
             else if (editions) methods = ['POST'];
             else if (scoped) methods = resource === 'participants' ? memberId ? ['PUT', 'DELETE'] : ['POST'] : drawResource ? ['POST'] : ['GET', 'HEAD', 'PUT'];
@@ -59,6 +61,7 @@ export const createApp = (store = new LocalStore()) => ({
                 }
                 else if (results) result = json(await store.results({ groupId: results[1], editionId: results[2] }));
                 else if (path === '/api/groups') result = json(await store.groups());
+                else if (deletion) result = json(await store.groupDeletionSummary(deletion[1]));
                 else if (group) result = json(await store.group(group[1]));
                 else result = json(path === '/api/health' ? { status: 'ok' } : await store.status(scope));
                 return method === 'HEAD' ? new Response(null, { status: result.status, headers: result.headers }) : result;
@@ -79,6 +82,12 @@ export const createApp = (store = new LocalStore()) => ({
             if (preview) return json(await store.preview(preview[1], input));
             if (campaign) return json(await store.startSend(input, { groupId: campaign[1], editionId: campaign[2] }, campaign[3] ?? 'new'), 202);
             if (path === '/api/groups') return json(await store.manage('createGroup', input), 201);
+            if (group && method === 'DELETE') {
+                if (!/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/.test(group[1])) {
+                    return json({ error: 'Identificador de grupo no válido.' }, 400);
+                }
+                return json(await store.deleteGroup(group[1], input));
+            }
             if (group) return json(await store.manage('renameGroup', input, group[1]));
             if (people) return json(await store.manage(people[2] ? 'editPerson' : 'addPerson', input, people[1], people[2]), people[2] ? 200 : 201);
             if (editions) return json(await store.manage('createEdition', input, editions[1]), 201);
@@ -92,6 +101,7 @@ export const createApp = (store = new LocalStore()) => ({
             const action = path === '/api/draw' ? 'draw' : path === '/api/draw/reset' ? 'reset' : participant ? method === 'DELETE' ? 'delete' : 'edit' : 'add';
             return json(await store.mutate(action, input, participant?.[1]), action === 'add' ? 201 : 200);
         } catch (error) {
+            if (error instanceof NoCompatibilityError) return json({ error: 'La edición de compatibilidad ya no existe. Selecciona un grupo y una edición en Mis grupos.' }, 409);
             return error instanceof AppError ? json({ error: error.message }, error.status) : json({ error: 'No se pudo acceder al almacenamiento local. Comprueba sus permisos y su integridad.' }, 503);
         }
     }
