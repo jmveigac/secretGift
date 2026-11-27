@@ -298,3 +298,9 @@ en la raíz.
 Uso local sin autenticación ni aislamiento entre personas con acceso. Los archivos de la CLI
 y sus asignaciones se guardan sin cifrar; Base64 no ofrece confidencialidad. Protege
 el equipo, las copias y los archivos de participantes, asignaciones y credenciales.
+
+### Apariencia
+
+Elige **Claro**, **Oscuro** o **Sistema** en la cabecera. La preferencia se
+guarda solo en el navegador. La cuenta atrás sigue la zona del evento y la
+disponibilidad de los resultados sigue dependiendo del servidor.

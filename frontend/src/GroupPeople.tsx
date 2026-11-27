@@ -1,3 +1,4 @@
+import { Avatar } from './VisualIdentity';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { Person } from './api';
 
@@ -73,7 +74,7 @@ export default function GroupPeople({ people, disabled, onSave }: Props) {
         </fieldset></form>}
         {!people.length && <p>Aún no hay personas en este grupo.</p>}
         <ul className="directory-list">{people.map(person => <li key={person.id}>
-            <div className="participant-details"><strong>{person.name}</strong><span>{person.email} · {person.active ? 'Activa' : 'Inactiva'}</span></div>
+            <div className="person-identity"><Avatar name={person.name} /><div className="participant-details"><strong>{person.name}</strong><span>{person.email} · {person.active ? 'Activa' : 'Inactiva'}</span></div></div>
             <div className="actions">
                 <button className="secondary" disabled={busy} aria-label={`Editar contacto de ${person.name}`} onClick={event => {
                     origin.current = event.currentTarget; setEditing(person); setName(person.name); setEmail(person.email); setValidation({}); setOpen(true);
