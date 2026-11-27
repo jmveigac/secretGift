@@ -1,3 +1,4 @@
+import ActionIcon from './ActionIcon';
 import { Avatar, DeliveryMeter, EventCountdown, EventDateTile, GiftMark, ThemeChoice, useCurrentMinute } from './VisualIdentity';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { groupsApi, editionApi, type Group, type GroupResponse, type EditionSummary } from './api';
@@ -135,11 +136,13 @@ export default function App() {
     }
     function groupActions(item: GroupResponse) {
         return <details className="group-actions">
-            <summary aria-label={`Acciones del grupo ${item.group.name}`}>Acciones del grupo</summary>
-            <button className="secondary" disabled={busy || item.busy} onClick={() => {
-                setRename(item.group.name); navigate({ view: 'groups', group: item.group.id, section: 'rename' });
-            }}>Cambiar nombre</button>
-            <DeleteGroup groupId={item.group.id} disabled={busy} onBusy={setChildBusy} onDeleted={remaining => groupDeleted(item.group.id, remaining)} compact />
+            <summary aria-label={`Acciones del grupo ${item.group.name}`}><ActionIcon icon="chevron" />Acciones del grupo</summary>
+            <div className="group-action-row">
+                <button className="secondary" disabled={busy || item.busy} onClick={() => {
+                    setRename(item.group.name); navigate({ view: 'groups', group: item.group.id, section: 'rename' });
+                }}><ActionIcon icon="edit" />Cambiar nombre</button>
+                <DeleteGroup groupId={item.group.id} disabled={busy} onBusy={setChildBusy} onDeleted={remaining => groupDeleted(item.group.id, remaining)} compact />
+            </div>
         </details>;
     }
     function drawCard(item: EditionSummary, owner: GroupResponse, showGroup: boolean) {
@@ -198,7 +201,10 @@ export default function App() {
                             remember(next); setConfirmed(id); navigate({ view: route.view, group: next.group.id, edition: id }, { bypass: true, replace: true });
                         }} />}
             </> : selected && group ? <>
-                <button className="secondary" disabled={busy} onClick={() => navigate(route.view === 'draws' ? { view: 'draws' } : groupRoute!)}>Volver a {route.view === 'draws' ? 'Sorteos' : group.group.name}</button>
+                <nav className="draw-trail" aria-label="Ruta del sorteo">
+                    {route.view === 'draws' && <><button className="secondary crumb" disabled={busy} onClick={() => navigate({ view: 'draws' })}>Sorteos</button><ActionIcon icon="chevron" /></>}
+                    <button className="secondary crumb" disabled={busy} onClick={() => navigate(groupRoute!)}>{group.group.name}</button>
+                </nav>
                 {confirmed === selected.edition.id && <div className="confirmation-moment" role="status"><GiftMark />
                     <div><strong>Sorteo confirmado</strong><p>{selected.edition.name} · {eventLabel(selected)}. Todavía no se han enviado correos.</p></div>
                     <button type="button" className="secondary" onClick={() => setConfirmed(undefined)}>Cerrar aviso</button>
@@ -207,8 +213,7 @@ export default function App() {
                     onChanged={async () => remember(await groupsApi.get(group.group.id))}
                     section={route.section}
                     onSection={section => navigate({ ...route, section })}
-                    onRepeat={() => navigate({ ...route, section: 'repeat' })}
-                    onGroup={() => navigate(groupRoute!)} />
+                    onRepeat={() => navigate({ ...route, section: 'repeat' })} />
             </> : group && groupRoute ? <>
                 <button className="secondary" disabled={busy} onClick={() => navigate({ view: 'groups' })}>Volver a Grupos</button>
                 <div className="section-heading"><h2 tabIndex={-1}>{group.group.name}</h2><button disabled={busy || group.busy} onClick={() => navigate({ ...groupRoute, section: 'new' })}>Nuevo sorteo</button></div>

@@ -1,3 +1,4 @@
+import ActionIcon from './ActionIcon';
 import { EventCountdown, EventDateTile, GiftMark } from './VisualIdentity';
 import MailProgress, { useMailProgress } from './MailProgress';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
@@ -12,8 +13,8 @@ export function eventLabel(edition: EditionSummary) {
 function Counts({ counts }: { counts: DeliveryCounts }) {
     return <dl className="counts"><div><dt>Pendientes</dt><dd>{counts.pending}</dd></div><div><dt>Aceptados por el servidor</dt><dd>{counts.accepted}</dd></div><div><dt>Rechazados</dt><dd>{counts.failed}</dd></div><div><dt>Resultado incierto</dt><dd>{counts.uncertain}</dd></div></dl>;
 }
-interface Props { now: number; group: GroupResponse; edition: EditionSummary; section?: string; onSection: (section: string) => void; onRepeat: () => void; onGroup: () => void; onBusy: (value: boolean) => void; onChanged: () => Promise<void> }
-export default function DrawDetail({ now, group, edition, section, onSection, onRepeat, onGroup, onBusy, onChanged }: Props) {
+interface Props { now: number; group: GroupResponse; edition: EditionSummary; section?: string; onSection: (section: string) => void; onRepeat: () => void; onBusy: (value: boolean) => void; onChanged: () => Promise<void> }
+export default function DrawDetail({ now, group, edition, section, onSection, onRepeat, onBusy, onChanged }: Props) {
     const scope: EditionScope = { groupId: group.group.id, editionId: edition.edition.id };
     const [state, setState] = useState<StateResponse>();
     const [results, setResults] = useState<ResultsResponse>();
@@ -71,8 +72,10 @@ export default function DrawDetail({ now, group, edition, section, onSection, on
         if (wasActive.current && !operationActive) void onChanged().catch(() => {});
         wasActive.current = operationActive;
     }, [operationActive, onChanged]);
+    const needsMailReview = !!(delivery?.failed || delivery?.uncertain);
+    const mailPrimary = !!delivery && (needsMailReview || !!delivery.pending || !!delivery.active || !state?.results?.available);
+    const mailLabel = needsMailReview ? 'Ver notificaciones' : delivery?.pending && !delivery.active ? 'Enviar notificaciones' : 'Ver notificaciones';
     return <section ref={detail} className="draw-detail" aria-label="Detalle del sorteo">
-        <button className="secondary context-link" disabled={pending} onClick={onGroup}>{group.group.name}</button>
         <div className="detail-heading">
             <EventDateTile schedule={state ? state.schedule : edition.edition.schedule} />
             <div>
@@ -93,16 +96,25 @@ export default function DrawDetail({ now, group, edition, section, onSection, on
             delivery.failed || delivery.uncertain ? 'Necesita revisión' :
             delivery.pending ? 'Notificaciones pendientes' : delivery.configured ? 'Sin notificaciones iniciales pendientes' : 'Envío sin configurar'
         }</strong></p>}
-        {state?.draw.completed && <div className="actions detail-actions">
-            {delivery && <button className={delivery.pending || delivery.failed || delivery.uncertain ? undefined : "secondary"} onClick={() => onSection('notificaciones')}>{delivery.pending ? 'Enviar notificaciones' : 'Ver notificaciones'}</button>}
-            {delivery && <button className="secondary" onClick={() => onSection('recordatorios')}>Recordar sorteo</button>}
-            <button className="secondary" disabled={pending || editorBusy} onClick={onRepeat}>Repetir sorteo</button>
-            {state.results?.available && <button className={delivery?.pending || delivery?.failed || delivery?.uncertain ? "secondary" : undefined} onClick={() => onSection('resultados')}>Resultados</button>}
-        </div>}
-        {state && !state.draw.completed && <button className="secondary" onClick={() => onSection('preparar')}>Continuar preparación</button>}
+        <div className="draw-toolbar" role="group" aria-label="Acciones del sorteo">
+            {state?.draw.completed && (mailPrimary
+                ? <button className="draw-action action-primary" onClick={() => onSection('notificaciones')}><ActionIcon icon="mail" />{mailLabel}</button>
+                : state.results?.available && <button className="draw-action action-primary" onClick={() => onSection('resultados')}><ActionIcon icon="results" />Resultados</button>)}
+            {state && !state.draw.completed && <button className="draw-action action-primary" onClick={() => onSection('preparar')}><ActionIcon icon="edit" />Continuar preparación</button>}
+            <div className="draw-secondary">
+                {state?.draw.completed && <>
+                    {delivery && !mailPrimary && <button className="secondary draw-action" onClick={() => onSection('notificaciones')}><ActionIcon icon="mail" />{mailLabel}</button>}
+                    {state.results?.available && mailPrimary && <button className="secondary draw-action" onClick={() => onSection('resultados')}><ActionIcon icon="results" />Resultados</button>}
+                    {delivery && <button className="secondary draw-action" aria-label="Recordar sorteo" onClick={() => onSection('recordatorios')}><ActionIcon icon="bell" /><span>Recordar<span className="draw-action-context"> sorteo</span></span></button>}
+                    <button className="secondary draw-action" aria-label="Repetir sorteo" disabled={pending || editorBusy} onClick={onRepeat}><ActionIcon icon="repeat" /><span>Repetir<span className="draw-action-context"> sorteo</span></span></button>
+                </>}
+                <button className="secondary draw-refresh" type="button" disabled={busy} aria-label="Actualizar estado"
+                    title="Volver a consultar el estado del sorteo y sus notificaciones"
+                    onClick={() => { void run(async () => update(await editionApi(scope).state())); }}><ActionIcon icon="refresh" /></button>
+            </div>
+        </div>
         {error && <p role="alert">{error}</p>}{pollError && <p role="alert">{pollError}</p>}
         {pending && <p role="status">Solicitud en curso…</p>}
-        <button className="secondary" disabled={busy} onClick={() => { void run(async () => update(await editionApi(scope).state())); }}>Actualizar estado</button>
         {state && <>
             <div className="reveal-panel" id="resultados"><GiftMark className="reveal-mark" /><h3 tabIndex={-1}>{state.results?.available ? 'Resultados disponibles' : 'Asignaciones ocultas'}</h3>
                 <p>{state.schedule ? `Revelación: ${state.schedule.localDateTime.replace('T', ' · ')} (${state.schedule.timeZone}). La hora del navegador no adelanta la revelación.` : 'Este sorteo no tiene fecha de revelación. No se mostrarán sus asignaciones automáticamente.'}</p>

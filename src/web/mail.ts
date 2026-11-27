@@ -1,8 +1,9 @@
 import 'dotenv/config';
-import { assignmentContent } from './mail-template';
+import type { Schedule } from '../domain/schedule';
+import { assignmentContent } from '../mail/assignment-template';
 import { smtpDelivery, isSmtpRateLimit, type AppMode } from '../mail/delivery';
 
-export interface AssignmentMessage { to: string; name: string; receiver: string }
+export interface AssignmentMessage { to: string; name: string; receiver: string; schedule?: Schedule; reminder?: boolean }
 export interface MailSender {
     configured: boolean;
     mode?: AppMode;
@@ -21,7 +22,7 @@ export function smtpSender(env = process.env): MailSender {
         async send(message, beforeAttempt, signal) {
             try {
                 const result = await delivery.send({ to: message.to, participant: message.name,
-                    subject: 'Amigo invisible', ...assignmentContent(message.name, message.receiver) }, beforeAttempt, signal);
+                    subject: 'Amigo invisible', ...assignmentContent(message.name, message.receiver, message) }, beforeAttempt, signal);
                 return result.accepted?.length === 1 ? 'accepted' : 'failed';
             } catch (error) {
                 if (isSmtpRateLimit(error)) return 'rateLimited';

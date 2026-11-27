@@ -355,3 +355,19 @@ it('celebrates a confirmed draw once and leaves email untouched', async () => {
     await user.click(button('Abrir Cena de prueba'));
     expect(screen.queryByText('Sorteo confirmado')).not.toBeInTheDocument();
 });
+
+it('keeps the refresh control named and places the relevant action first', async () => {
+    const user = await open();
+    await user.click(button('Abrir Navidad'));
+    const toolbar = screen.getByRole('group', { name: 'Acciones del sorteo' });
+    const pending = await within(toolbar).findByRole('button', { name: 'Enviar notificaciones' });
+    expect(pending).toHaveClass('action-primary');
+    expect(within(toolbar).getByRole('button', { name: 'Actualizar estado' })).toHaveAccessibleDescription(/Volver a consultar/);
+    expect(within(screen.getByRole('navigation', { name: 'Ruta del sorteo' })).getAllByRole('button')).toHaveLength(1);
+
+    state.results = { available: true, reason: 'scheduled' };
+    state.delivery = { ...state.delivery!, pending: 0, accepted: 2 };
+    await user.click(within(toolbar).getByRole('button', { name: 'Actualizar estado' }));
+    await waitFor(() => expect(within(toolbar).getByRole('button', { name: 'Resultados' })).toHaveClass('action-primary'));
+    expect(within(toolbar).getByRole('button', { name: 'Ver notificaciones' })).not.toHaveClass('action-primary');
+});

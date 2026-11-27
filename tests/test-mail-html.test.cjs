@@ -4,8 +4,8 @@ const {JSDOM}=require('jsdom');
 const nodemailer=require('nodemailer');
 const {smtpDelivery}=require('../build/mail/delivery');
 const {smtpSender}=require('../build/web/mail');
-const {assignmentContent}=require('../build/web/mail-template');
-const {createHtmlMessage}=require('../build/utils/messageUtils');
+const {assignmentContent}=require('../build/mail/assignment-template');
+const {createMailList}=require('../build/drawParticipants');
 const config={SMTP_SEND_INTERVAL_MS:"0",APP_MODE:'test',TEST_EMAIL:'test@example.invalid',HOST:'smtp.example.invalid',PORT:'465',FROM:'Synthetic <sender@example.invalid>',MAILUSER:'synthetic',MAILPWD:'synthetic'};
 
 async function capture(run){
@@ -52,9 +52,9 @@ test('test web mail keeps the document, original content and text; banner stays 
  });
 });
 
-test('test CLI fragments become one complete document without losing their original HTML',async()=>{
+test('test legacy fragments become one complete document without losing their original HTML',async()=>{
  await capture(async({messages})=>{
-  const fragment=createHtmlMessage({name:'Synthetic name'},'Synthetic recipient');
+  const fragment='<p>Hola Synthetic name: Synthetic recipient</p>';
   await smtpDelivery(config).send({to:'person@example.invalid',participant:'Synthetic name',subject:'CLI',text:'Original plain text',html:fragment});
   const message=messages[0],document=documentFor(message.html);
   assert.ok(message.html.includes(fragment));assert.equal(document.body.firstElementChild.textContent,'PRUEBA — Participante original: Synthetic name');
@@ -102,4 +102,29 @@ test('production normalizes Unicode recipient domains in the compiled envelope',
    assert.doesNotMatch(message.message.toString(), /test@example\.invalid/);
   }
  });
+});
+
+test('shared mail covers scheduled reminders, special characters, and the undated CLI', async()=>{
+ const name='María <em> & "', receiver='Álex <img src=x> & ' + 'L'.repeat(90);
+ const schedule={timeZone:'Europe/Madrid',eventAt:'2027-11-17T17:30:00Z'};
+ await capture(async({messages,compiled})=>{
+  assert.equal(await smtpSender(config).send({to:'original@example.invalid',name,receiver,schedule,reminder:true}),'accepted');
+  const m=messages[0], doc=documentFor(m.html);
+  assert.equal(doc.querySelector('h1').textContent,'Tu secreto sigue en marcha');
+  assert.ok(doc.body.textContent.includes(receiver));
+  assert.ok(doc.body.textContent.includes(name));
+  assert.match(m.text,/17 de noviembre de 2027 a las 18:30/);
+  assert.match(doc.body.textContent,/17 de noviembre de 2027 a las 18:30/);
+  assert.equal(doc.querySelector('img,script,link,iframe,a,style'),null);
+  assert.deepEqual(m.envelope.to,[config.TEST_EMAIL]);
+  const mime=compiled[0].message.toString();
+  assert.match(mime,/multipart\/alternative/);
+  assert.doesNotMatch(mime,/Content-Disposition: attachment|Content-ID:/);
+ });
+ const [cli]=createMailList([{name,email:'original@example.invalid',lastGift:receiver}]);
+ const doc=documentFor(cli.messageHtml);
+ assert.equal(doc.querySelector('h1').textContent,'¡Ya tienes un secreto!');
+ assert.ok(doc.body.textContent.includes(receiver));
+ assert.ok(cli.messageText.includes(receiver));
+ assert.doesNotMatch(cli.messageHtml,/El encuentro|localhost|https?:/);
 });

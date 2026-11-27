@@ -69,10 +69,10 @@ test('reminders resend original pairs to all including initial accepted and reta
  const sendReminder=async(path,body)=>{const r=await f.request(path,body);if(r.status===202)r.data=await waitForMail(()=>f.store.status(scope));return r;};
  let s=await f.store.status(scope);await f.store.send(sendPayload(s),scope);assert.equal(calls.length,4);const before=await f.read(e);
  s=await f.store.status(scope);const payload=sendPayload(s);let r=await sendReminder(url+'/reminders',payload);assert.equal(r.status,202);assert.equal(calls.length,8);assert.equal(r.data.campaigns.length,1);assert.equal(r.data.campaigns[0].accepted,4);assert.equal(r.data.delivery.accepted,4);assert.equal(r.data.results.available,false);
- assert.deepEqual(calls.slice(0,4),calls.slice(4,8));assert.equal((await sendReminder(url+'/reminders',payload)).status,409);
+ assert.deepEqual(calls.slice(0,4).map(message=>({...message,reminder:true})),calls.slice(4,8));assert.equal((await sendReminder(url+'/reminders',payload)).status,409);
  mode='uncertain';s=await f.store.status(scope);r=await sendReminder(url+'/reminders',sendPayload(s));assert.equal(r.data.campaigns.length,2);const c=r.data.campaigns[1];assert.equal(c.uncertain,4);assert.equal(calls.length,12);
  mode='accepted';s=await f.store.status(scope);r=await sendReminder(url+'/reminders/'+c.id+'/send',{...sendPayload(s),revision:c.revision});assert.equal(r.status,202);assert.equal(calls.length,12);
- const current=r.data.campaigns[1];r=await sendReminder(url+'/reminders/'+c.id+'/send',{...sendPayload(r.data),revision:current.revision,retryUncertain:true});assert.equal(r.status,202);assert.equal(calls.length,16);assert.equal(r.data.campaigns[1].accepted,4);
+ const current=r.data.campaigns[1];r=await sendReminder(url+'/reminders/'+c.id+'/send',{...sendPayload(r.data),revision:current.revision,retryUncertain:true});assert.equal(r.status,202);assert.equal(calls.length,16);assert.ok(calls.slice(12).every(message=>message.reminder));assert.equal(r.data.campaigns[1].accepted,4);
  assert.deepEqual((await f.read(e)).draw.assignments,before.draw.assignments);assert.deepEqual((await f.read(e)).draw.deliveries,before.draw.deliveries);
  const restart=new LocalStore(f.file,15,mail,f.key);assert.equal((await restart.status(scope)).campaigns.length,2);
  const prod=new LocalStore(f.file,15,{...mail,mode:'production'},f.key);s=await prod.status(scope);await assert.rejects(prod.send({...sendPayload(s),revision:s.campaigns[0].revision},scope,c.id),e=>e.status===409);

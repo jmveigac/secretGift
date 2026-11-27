@@ -285,5 +285,29 @@ td,th { border-bottom:1px solid var(--line); }
 .detail-heading p { margin:.25rem 0 .45rem; color:var(--muted); }
 .detail-facts { display:flex; align-items:center; flex-wrap:wrap; gap:.35rem .55rem; font-size:.87rem; }
 .detail-facts .countdown { max-width:none; }
-.context-link { margin-bottom:.4rem; }
 h2:focus-visible,h3:focus-visible,h4:focus-visible { outline-color:var(--accent); border-radius:.2rem; outline-offset:.25rem; }
+
+/* Contextual actions share the same icon scale and keep their own hit areas. */
+.action-icon { width:1.05rem; height:1.05rem; flex:none; }
+.group-actions > summary { display:inline-flex; align-items:center; gap:.4rem; list-style:none; border-radius:.45rem; }
+.group-actions > summary::-webkit-details-marker { display:none; }
+.group-actions[open] > summary .action-icon { transform:rotate(90deg); }
+.group-action-row { display:flex; flex-wrap:wrap; align-items:start; gap:.45rem; padding:.45rem .55rem; border:1px solid var(--line); border-radius:.65rem; background:var(--bg); }
+.group-action-row button,.draw-action { display:inline-flex; align-items:center; gap:.4rem; padding-inline:.7rem; }
+.group-action-row .compact-danger { margin:0; }
+.group-action-row .compact-danger > button { border-color:transparent; }
+.draw-trail { display:flex; flex-wrap:wrap; align-items:center; gap:.2rem; margin:0 0 .45rem; color:var(--muted); }
+.draw-trail .crumb { color:var(--muted); border-color:transparent; text-decoration:underline; text-underline-offset:.25em; padding-inline:.45rem; }
+.draw-trail > .action-icon { width:.75rem; }
+.draw-detail > .detail-heading h2:focus { outline:none; text-decoration:underline; text-decoration-color:var(--accent); text-decoration-thickness:.12em; text-underline-offset:.17em; }
+.draw-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:.45rem; padding:.5rem; border:1px solid var(--line); border-radius:.85rem; background:var(--surface); width:fit-content; max-width:100%; }
+.draw-toolbar .draw-action.secondary { border-color:transparent; }
+.draw-refresh { flex:none; display:grid; place-items:center; width:44px; height:44px; padding:0; }
+.draw-secondary { display:flex; flex-wrap:wrap; gap:.35rem; align-items:center; }
+@media (max-width:550px) {
+  .draw-toolbar { width:100%; display:grid; }
+  .draw-toolbar .action-primary { justify-content:center; }
+  .draw-secondary { flex-wrap:nowrap; }
+  .draw-action-context { display:none; }
+  .draw-toolbar .draw-action.secondary { flex:1; min-width:0; justify-content:center; flex-direction:column; gap:.15rem; padding:.4rem .15rem; font-size:.77rem; text-align:center; }
+}

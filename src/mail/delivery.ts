@@ -37,8 +37,8 @@ const mailbox = (value: string | undefined): value is string => !!value && value
 const escapeHtml = (value: string) => value.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 
 function testHtml(html: string, notice: string): string {
-    const banner = `<p>${escapeHtml(notice)}</p>`;
-    // Web mail is a complete document; the legacy CLI supplies an HTML fragment.
+    const banner = `<p style="margin:0;padding:12px 16px;background-color:#fae9db;color:#753a23;font:bold 14px/1.45 Arial,Helvetica,sans-serif;overflow-wrap:anywhere;word-break:break-word;">${escapeHtml(notice)}</p>`;
+    // Shared assignment mail is a complete document. Legacy fragments are also supported.
     if (/<body\b[^>]*>/i.test(html)) return html.replace(/<body\b[^>]*>/i, opening => opening + banner);
     return `<!doctype html><html><head><meta charset="utf-8"></head><body>${banner}${html}</body></html>`;
 }

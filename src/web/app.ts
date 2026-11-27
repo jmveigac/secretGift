@@ -2,7 +2,7 @@ import { LocalStore, AppError } from './store';
 import { NoCompatibilityError } from './database';
 import { promises as fs } from 'node:fs';
 import { resolve } from 'node:path';
-import { assignmentContent } from './mail-template';
+import { assignmentContent } from '../mail/assignment-template';
 export const BODY_LIMIT = 16384;
 export const headers = {
     'Cache-Control': 'no-store',

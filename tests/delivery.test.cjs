@@ -6,7 +6,7 @@ const path = require('node:path');
 const { LocalStore } = require('../build/web/store');
 const { createApp } = require('../build/web/app');
 const { smtpSender } = require('../build/web/mail');
-const { assignmentContent } = require('../build/web/mail-template');
+const { assignmentContent } = require('../build/mail/assignment-template');
 const { EncryptedDatabase } = require('../build/web/database');
 async function diskState(file) { const db=await EncryptedDatabase.open(file,path.join(path.dirname(file),'../keys/storage.key'),path.join(path.dirname(file),'state.json'),()=>{});try{return db.read();}finally{db.close();} }
 async function writeState(file,state) { const db=await EncryptedDatabase.open(file,path.join(path.dirname(file),'../keys/storage.key'),path.join(path.dirname(file),'state.json'),()=>{});try{db.write(state);}finally{db.close();} }
@@ -112,7 +112,7 @@ test('web SMTP transport sends only the individual assignment and classifies def
   const sender=smtpSender({SMTP_SEND_INTERVAL_MS:'0',APP_MODE:'production',HOST:'smtp.example.invalid',FROM:'"Organizador" <sender@example.invalid>',PORT:'465',MAILUSER:'synthetic',MAILPWD:'synthetic'});
   const input={to:'ana@example.invalid',name:'Ana',receiver:'Bea'};
   assert.equal(sender.configured,true);assert.equal(await sender.send(input),'accepted');
-  assert.equal(options.secure,true);assert.equal(message.to,input.to);assert.match(message.text,/Hola Ana/);assert.match(message.text,/regalar a Bea/);assert.equal(message.cc,undefined);assert.equal(message.bcc,undefined);
+  assert.equal(options.secure,true);assert.equal(message.to,input.to);assert.match(message.text,/Hola Ana/);assert.match(message.text,/regalar a:\s+Bea/);assert.equal(message.cc,undefined);assert.equal(message.bcc,undefined);
   assert.equal(message.subject,'Amigo invisible');
   assert.equal(message.html,assignmentContent(input.name,input.receiver).html);
   assert.equal(message.text,assignmentContent(input.name,input.receiver).text);
@@ -200,7 +200,7 @@ test('real HTTP accepts a reservation before SMTP completes and preserves pendin
  for (const message of attempts) {
   assert.deepEqual(message.envelope.to, ['test@example.invalid']);
   assert.equal(message.to, 'test@example.invalid');
-  assert.match(message.html, /^<!doctype html>[\s\S]*<body[^>]*><p>PRUEBA/i);
+  assert.match(message.html, /^<!doctype html>[\s\S]*<body[^>]*><p[^>]*>PRUEBA/i);
  }
 });
 

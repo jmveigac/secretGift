@@ -1,3 +1,4 @@
+import ActionIcon from './ActionIcon';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { normalizeGroupName } from '../../src/domain/group-name';
 import { groupsApi, type Group, type GroupDeletionSummary } from './api';
@@ -67,7 +68,7 @@ export default function DeleteGroup({ groupId, disabled, onBusy, onDeleted, comp
         {!compact && <h3>Eliminar grupo</h3>}
         <button className="danger" type="button" ref={opener} disabled={disabled || pending}
             onClick={() => { void run(async () => setSummary(await groupsApi.deletion(groupId))); }}>
-            Eliminar grupo
+            <ActionIcon icon="trash" />Eliminar grupo
         </button>
         {!summary && error && <p role="alert">{error}</p>}
         {summary && <dialog ref={dialog} className="delete-group-dialog" aria-labelledby="delete-group-title"
