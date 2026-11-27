@@ -77,18 +77,18 @@ export const createApp = (store = new LocalStore()) => ({
             let input: unknown;
             try { input = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { return json({ error: 'JSON no válido.' }, 400); }
             if (preview) return json(await store.preview(preview[1], input));
-            if (campaign) return json(await store.send(input, { groupId: campaign[1], editionId: campaign[2] }, campaign[3] ?? 'new'));
+            if (campaign) return json(await store.startSend(input, { groupId: campaign[1], editionId: campaign[2] }, campaign[3] ?? 'new'), 202);
             if (path === '/api/groups') return json(await store.manage('createGroup', input), 201);
             if (group) return json(await store.manage('renameGroup', input, group[1]));
             if (people) return json(await store.manage(people[2] ? 'editPerson' : 'addPerson', input, people[1], people[2]), people[2] ? 200 : 201);
             if (editions) return json(await store.manage('createEdition', input, editions[1]), 201);
             if (scope) {
                 if (method === 'PUT' && !resource && !drawResource) return json(await store.configure(scope, input));
-                if (drawAction === 'send') return json(await store.send(input, scope));
+                if (drawAction === 'send') return json(await store.startSend(input, scope), 202);
                 const action = drawResource ? drawAction === 'reset' ? 'reset' : 'draw' : !memberId ? 'add' : method === 'DELETE' ? 'delete' : 'edit';
                 return json(await store.mutate(action, input, memberId, scope), action === 'add' ? 201 : 200);
             }
-            if (path === '/api/draw/send') return json(await store.send(input));
+            if (path === '/api/draw/send') return json(await store.startSend(input), 202);
             const action = path === '/api/draw' ? 'draw' : path === '/api/draw/reset' ? 'reset' : participant ? method === 'DELETE' ? 'delete' : 'edit' : 'add';
             return json(await store.mutate(action, input, participant?.[1]), action === 'add' ? 201 : 200);
         } catch (error) {

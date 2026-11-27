@@ -1,10 +1,10 @@
 import type { ParticipantInput, StateResponse, Group, GroupResponse, EditionScope, ResultsResponse, RestrictionPreview } from '../../src/web/contracts';
 export type { Participant, ParticipantInput, StateResponse, Group, GroupResponse, Person, EditionScope, EditionSummary, CampaignSummary, DeliveryCounts, ResultsResponse, RestrictionPreview } from '../../src/web/contracts';
 
-async function request<T = StateResponse>(path: string, method = 'GET', body?: unknown): Promise<T> {
+async function request<T = StateResponse>(path: string, method = 'GET', body?: unknown, signal?: AbortSignal): Promise<T> {
     const response = await fetch(path, {
         method,
-        cache: 'no-store',
+        cache: 'no-store', signal,
         headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
         body: body === undefined ? undefined : JSON.stringify(body),
     });
@@ -14,7 +14,7 @@ async function request<T = StateResponse>(path: string, method = 'GET', body?: u
 }
 
 export const api = {
-    state: () => request('/api/state'),
+    state: (signal?: AbortSignal) => request('/api/state', 'GET', undefined, signal),
     save: (participant: ParticipantInput, id?: string) =>
         request(`/api/participants${id ? `/${id}` : ''}`, id ? 'PUT' : 'POST', participant),
     remove: (id: string) => request(`/api/participants/${id}`, 'DELETE', {}),
@@ -38,7 +38,7 @@ export function editionApi(scope?: EditionScope, expectedRevision?: string, expe
     const base = `/api/groups/${scope.groupId}/editions/${scope.editionId}`;
     const write = (path: string, method: string, body: object) => request(base + path, method, { ...body, expectedRevision });
     return {
-        state: () => request(base),
+        state: (signal?: AbortSignal) => request(base, 'GET', undefined, signal),
         addPerson: (personId: string) => write('/participants', 'POST', { personId, expectedGroupRevision }),
         save: (participant: ParticipantInput, id?: string) => write(`/participants${id ? `/${id}` : ''}`, id ? 'PUT' : 'POST', participant),
         remove: (id: string) => write(`/participants/${id}`, 'DELETE', {}),

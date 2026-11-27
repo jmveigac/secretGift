@@ -6,7 +6,7 @@ const {smtpDelivery}=require('../build/mail/delivery');
 const {smtpSender}=require('../build/web/mail');
 const {assignmentContent}=require('../build/web/mail-template');
 const {createHtmlMessage}=require('../build/utils/messageUtils');
-const config={APP_MODE:'test',TEST_EMAIL:'test@example.invalid',HOST:'smtp.example.invalid',PORT:'465',FROM:'Synthetic <sender@example.invalid>',MAILUSER:'synthetic',MAILPWD:'synthetic'};
+const config={SMTP_SEND_INTERVAL_MS:"0",APP_MODE:'test',TEST_EMAIL:'test@example.invalid',HOST:'smtp.example.invalid',PORT:'465',FROM:'Synthetic <sender@example.invalid>',MAILUSER:'synthetic',MAILPWD:'synthetic'};
 
 async function capture(run){
  const original=nodemailer.createTransport,messages=[],compiled=[];

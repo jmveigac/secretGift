@@ -1,3 +1,4 @@
+import MailProgress from './MailProgress';
 import type { StateResponse } from './api';
 
 interface Props {
@@ -30,6 +31,7 @@ export default function DrawPanel({ drawBlocked = false, state, pending, sending
             <p>{delivery.active || sending ? 'Envíos en curso.' : delivery.accepted === state.draw.participantCount ? 'Envíos completados: aceptados por SMTP.' : delivery.failed ? 'Hay envíos fallidos.' : delivery.uncertain ? 'Hay envíos con resultado incierto.' : 'Envíos pendientes.'}</p>
             <p>Aceptados: {delivery.accepted} · Pendientes: {delivery.pending} · Fallidos: {delivery.failed} · Inciertos: {delivery.uncertain}</p>
             <p>La aceptación por SMTP no confirma la llegada a la bandeja de entrada.</p>
+            <MailProgress state={state} />
             {!delivery.configured && <p role="alert">{delivery.configurationError ?? 'SMTP no está configurado. Configura las variables privadas y reinicia la aplicación.'}</p>}
             <button disabled={busy || !delivery.configured || delivery.pending + delivery.failed === 0} onClick={() => onSend()}>Enviar pendientes y fallidos</button>
             {delivery.uncertain > 0 && <>
@@ -37,6 +39,6 @@ export default function DrawPanel({ drawBlocked = false, state, pending, sending
                 <button disabled={busy || !delivery.configured} onClick={() => onSend(true)}>Reenviar también inciertos</button>
             </>}
         </div>}
-        <button className="secondary" disabled={pending} onClick={onRefresh}>Actualizar estado</button>
+        <button className="secondary" disabled={busy} onClick={onRefresh}>Actualizar estado</button>
     </section>;
 }

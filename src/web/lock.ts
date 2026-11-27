@@ -4,9 +4,9 @@ import { dirname } from 'node:path';
 
 // Linux advisory lock: released by the OS even after SIGKILL/container restart.
 // The child holds it until stdin closes; its descriptor is never inherited by SMTP.
-export async function storageLock(path: string): Promise<() => Promise<void>> {
+export async function storageLock(path: string, waitSeconds = 0): Promise<() => Promise<void>> {
     await fs.mkdir(dirname(path), { recursive: true, mode: 0o700 });
-    const child = spawn('flock', ['-n', `${path}.lock`, 'sh', '-c', 'echo locked; cat >/dev/null'], { stdio: ['pipe', 'pipe', 'ignore'] });
+    const child = spawn('flock', [...(waitSeconds ? ['-w', String(waitSeconds)] : ['-n']), `${path}.lock`, 'sh', '-c', 'echo locked; cat >/dev/null'], { stdio: ['pipe', 'pipe', 'ignore'] });
     let exited = false;
     const done = new Promise<void>(resolve => child.once('exit', () => { exited = true; resolve(); }));
     await new Promise<void>((resolve, reject) => {

@@ -1,3 +1,4 @@
+import MailProgress, { useMailProgress } from './MailProgress';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { editionApi, workflowApi, type CampaignSummary, type DeliveryCounts, type EditionScope, type EditionSummary, type GroupResponse, type ResultsResponse, type StateResponse } from './api';
 import EditionPanel from './EditionPanel';
@@ -15,15 +16,16 @@ export default function DrawDetail({ group, edition, reminderOnly = false, onBus
     const [state, setState] = useState<StateResponse>();
     const [results, setResults] = useState<ResultsResponse>();
     const [pending, setPending] = useState(true), [editorBusy, setEditorBusy] = useState(false);
-    const [error, setError] = useState(''), [notice, setNotice] = useState('');
+    const [error, setError] = useState(''), [pollError, setPollError] = useState('');
     const [title, setTitle] = useState(edition.edition.name), [date, setDate] = useState(''), [time, setTime] = useState('20:00'), [zone, setZone] = useState('Europe/Madrid');
     const lock = useRef(false);
     useEffect(() => { let active = true; editionApi(scope).state().then(s => { if (active) setState(s); }).catch(() => { if (active) setError('No se pudo cargar el sorteo. Actualiza para reintentar.'); }).finally(() => { if (active) setPending(false); }); return () => { active = false; }; }, []);
     useEffect(() => { onBusy(pending || editorBusy); return () => onBusy(false); }, [pending, editorBusy, onBusy]);
+    useMailProgress(scope, state, setState, setPollError);
     const busy = pending || editorBusy || !!state?.delivery?.active;
     async function run(action: () => Promise<void>) {
         if (lock.current || pending || editorBusy) { setError('Hay una solicitud en curso. Espera antes de continuar.'); return; }
-        lock.current = true; setPending(true); setError(''); setNotice('');
+        lock.current = true; setPending(true); setError('');
         try { await action(); } catch (e) { setError(e instanceof Error ? e.message : 'La solicitud no se pudo completar.'); }
         finally { lock.current = false; setPending(false); }
     }
@@ -43,10 +45,6 @@ export default function DrawDetail({ group, edition, reminderOnly = false, onBus
                 ? await editionApi(scope, state.revision).send(state.draw.completed ? state.draw.completedAt : '', delivery.revision, retryUncertain)
                 : await workflowApi.reminder(scope, state, typeof kind === 'object' ? kind : undefined, retryUncertain);
             await update(next);
-            const counts = kind === 'initial' ? next.delivery! : kind === 'new' ? next.campaigns!.at(-1)! : next.campaigns!.find(c => c.id === kind.id)!;
-            setNotice(counts.pending || counts.failed || counts.uncertain
-                ? 'Solicitud procesada con entregas pendientes, rechazadas o inciertas. Revisa los contadores antes de reintentar.'
-                : 'Todos los mensajes de esta solicitud fueron aceptados por SMTP. Esto no confirma su recepción.');
         });
     }
     function configure(event: FormEvent) {
@@ -56,18 +54,19 @@ export default function DrawDetail({ group, edition, reminderOnly = false, onBus
     const delivery = state?.delivery;
     return <section className="draw-detail" aria-label="Detalle del sorteo">
         <div className="section-heading"><div><p className="eyebrow">{group.group.name} · {edition.edition.year}</p><h2>{edition.edition.name}</h2><p>{state?.schedule ? `${state.schedule.localDateTime.replace('T', ' · ')} (${state.schedule.timeZone})` : eventLabel(edition)}</p></div><span className="badge">{state?.draw.completed ? 'Confirmado' : 'Borrador'}</span></div>
-        {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
+        {error && <p role="alert">{error}</p>}{pollError && <p role="alert">{pollError}</p>}
         {pending && <p role="status">Solicitud en curso…</p>}
-        <button className="secondary" disabled={pending || editorBusy} onClick={() => { void run(async () => update(await editionApi(scope).state())); }}>Actualizar estado</button>
+        <button className="secondary" disabled={busy} onClick={() => { void run(async () => update(await editionApi(scope).state())); }}>Actualizar estado</button>
         {state && <>
             <div className="reveal-panel"><h3>{state.results?.available ? 'Resultados disponibles' : 'Asignaciones ocultas'}</h3>
                 <p>{state.schedule ? `Revelación: ${state.schedule.localDateTime.replace('T', ' · ')} (${state.schedule.timeZone}). La hora del navegador no adelanta la revelación.` : 'Este sorteo no tiene fecha de revelación. No se mostrarán sus asignaciones automáticamente.'}</p>
-                {state.results?.available && <button className="secondary" disabled={busy} onClick={() => { void run(async () => setResults(await workflowApi.results(scope))); }}>Ver resultados</button>}
+                {state.results?.available && <button className="secondary" disabled={pending || editorBusy} onClick={() => { void run(async () => setResults(await workflowApi.results(scope))); }}>Ver resultados</button>}
                 {results && <table><caption>Asignaciones de {edition.edition.name}</caption><thead><tr><th scope="col">Regala</th><th scope="col">Recibe</th></tr></thead><tbody>{results.assignments.map(a => <tr key={a.giver.id}><td>{a.giver.name}</td><td>{a.receiver.name}</td></tr>)}</tbody></table>}
             </div>
             {state.draw.completed && delivery && <div className="notification-panel">
                 <h3>{reminderOnly ? 'Recordar este sorteo' : 'Notificaciones'}</h3>
                 <p className="mode-banner">{delivery.mode === 'test' ? <><strong>Modo PRUEBAS</strong> · Todos los mensajes irán exclusivamente a <strong>{delivery.testEmail ?? 'buzón sin configurar'}</strong>.</> : delivery.mode === 'production' ? <><strong>Modo PRODUCCIÓN</strong> · Los destinatarios son los {state.draw.participantCount} participantes de esta edición.</> : 'Modo de envío sin configurar.'}</p>
+                <MailProgress state={state} />
                 {!delivery.configured && <p role="alert">{delivery.configurationError ?? 'Configura el modo y las variables SMTP antes de enviar.'}</p>}
                 <p>Aceptado por SMTP no significa recibido en la bandeja de entrada. Un resultado incierto puede haber llegado: reenviarlo puede duplicarlo.</p>
                 {!reminderOnly && <><h4>Campaña inicial · {delivery.mode === 'test' ? 'pruebas' : 'producción'}</h4><Counts counts={delivery} />

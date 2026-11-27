@@ -157,8 +157,8 @@ it('shows an HTTP 503 rejection and never reports global success for partial del
     fetchMock.mockResolvedValueOnce(response({ error: 'No se pudo acceder al almacenamiento local.' }, 503));
     await user.click(button('Enviar 2 notificaciones')); expect(await screen.findByRole('alert')).toHaveTextContent('No se pudo acceder al almacenamiento local.');
     expect(screen.queryByText(/Todos los mensajes de esta solicitud/)).not.toBeInTheDocument();
-    fetchMock.mockResolvedValueOnce(response({ ...state, delivery: { ...delivery, pending: 0, accepted: 1, failed: 1 } }));
-    await user.click(button('Enviar 2 notificaciones')); expect(await screen.findByText(/Solicitud procesada con entregas pendientes/)).toBeInTheDocument();
+    fetchMock.mockResolvedValueOnce(response({ ...state, delivery: { ...delivery, pending: 0, accepted: 1, failed: 1 }, mailOperation: { id: 'test-operation', kind: 'initial', mode: 'test', status: 'finished', total: 2, processed: 2 } }));
+    await user.click(button('Enviar 2 notificaciones')); expect(await screen.findByText(/Operación finalizada/)).toBeInTheDocument();
     expect(screen.queryByText(/Todos los mensajes de esta solicitud/)).not.toBeInTheDocument();
 });
 it('makes production recipients explicit and blocks configuration errors without confirmation', async () => {

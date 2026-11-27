@@ -1,3 +1,4 @@
+import { useMailProgress } from './MailProgress';
 import { useEffect, useRef, useState } from 'react';
 import { editionApi, type EditionScope, type Person, type Participant, type ParticipantInput, type StateResponse } from './api';
 import ParticipantList from './ParticipantList';
@@ -12,10 +13,11 @@ export default function EditionPanel({ requireSchedule = false, scope, people = 
     const [pending, setPending] = useState(true);
     const [sending, setSending] = useState(false);
     const [error, setError] = useState('');
-    const [notice, setNotice] = useState('');
+    const [pollError, setPollError] = useState('');
     const inFlight = useRef(false);
     const [personId, setPersonId] = useState('');
 
+    useMailProgress(scope, state, setState, setPollError);
     const api = editionApi(scope, state?.revision, groupRevision);
     useEffect(() => {
         onBusy?.(pending || sending);
@@ -43,7 +45,6 @@ export default function EditionPanel({ requireSchedule = false, scope, people = 
         inFlight.current = true;
         setPending(true);
         setError('');
-        setNotice('');
         try {
             const next = await operation();
             setState(next);
@@ -93,7 +94,7 @@ export default function EditionPanel({ requireSchedule = false, scope, people = 
                 setSending(true);
                 try { return await api.send(drawId, delivery.revision, retryUncertain); }
                 finally { setSending(false); }
-            }).then(completed => { if (completed) setNotice('Solicitud de envío completada. Revisa los contadores; aceptación SMTP no confirma recepción.'); });
+            });
         }
     }
 
@@ -107,7 +108,7 @@ export default function EditionPanel({ requireSchedule = false, scope, people = 
     return <section aria-label="Edición seleccionada">
         <p role="status" aria-live="polite">{pending ? state ? 'Guardando cambios…' : 'Cargando datos…' : ''}</p>
         {error && <p role="alert">{error}</p>}
-        {notice && <p role="status">{notice}</p>}
+        {pollError && <p role="alert">{pollError}</p>}
         {state && <>
             {scope && <fieldset disabled={pending || blocked || locked || !!state.delivery?.active || state.participants.length >= state.maxParticipants}>
                 <label htmlFor="edition-person">Añadir persona activa del grupo a esta edición</label>

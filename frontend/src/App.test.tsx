@@ -203,7 +203,7 @@ it('shows test mailbox, exact retry count and explicit test confirmation', async
     fetchMock.mockResolvedValueOnce(response(mailState({ mode: 'test', testEmail: 'test@example.invalid', pending: 0, failed: 0, accepted: 3 })));
     await user.click(button('Enviar pendientes y fallidos'));
     expect(window.confirm).toHaveBeenLastCalledWith(expect.stringMatching(/Modo PRUEBAS.*test@example.invalid.*2 mensajes/));
-    await screen.findByText(/Solicitud de envío completada/);
+    await screen.findByText('Envíos completados: aceptados por SMTP.');
 });
 
 for (const status of [409, 503]) it(`communicates HTTP ${status}, preserves counters and allows refresh`, async () => {
@@ -228,7 +228,7 @@ it('rejects a second synchronous click before showing another confirmation', asy
     expect(window.confirm).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     finish(response(mailState({ accepted: 3, pending: 0 })));
-    await screen.findByText(/Solicitud de envío completada/);
+    await screen.findByText('Envíos completados: aceptados por SMTP.');
 });
 
 it('communicates a guard activated during confirmation instead of silently skipping the send', async () => {
@@ -263,6 +263,6 @@ it('distinguishes a completed send from a failure to refresh its parent group', 
     fetchMock.mockResolvedValueOnce(response(mailState({ pending: 0, accepted: 3 })));
     await user.click(button('Enviar pendientes y fallidos'));
     expect(await screen.findByRole('alert')).toHaveTextContent('La operación se completó, pero no se pudo actualizar el grupo');
-    expect(screen.getByText(/Solicitud de envío completada/)).toBeInTheDocument();
+    expect(screen.getByText('Envíos completados: aceptados por SMTP.')).toBeInTheDocument();
     expect(button('Enviar pendientes y fallidos')).toBeDisabled();
 });

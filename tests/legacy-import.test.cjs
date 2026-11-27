@@ -127,16 +127,16 @@ test('insertion cannot invalidate a successor or assign order around ambiguous m
  const sql=new DatabaseSync(f.options.data);sql.prepare('UPDATE draw SET history_sequence=NULL WHERE edition_id=?').run(first.edition.id);sql.close();
  await f.write({...middle,history:{completedAt:'2004-05-06T12:30:00.000Z',sequence:4}});await assert.rejects(f.preview(),/orden desconocido/);
 });
-test('shared storage lock blocks import during SMTP, which continues unchanged without extra mail',async()=>{
+test('independent import preview remains available during SMTP without extra mail',async()=>{
  const f=await fixture();await f.write(f.makePlan('assignments'));await f.commit();const first=(await f.state())[0];
  let start,finish;const started=new Promise(r=>start=r),waiting=new Promise(r=>finish=r);let sent=0;
  const store=new LocalStore(f.options.data,15,{configured:true,send:async()=>{sent++;start();await waiting;return 'accepted';}},f.options.key);
  const scope={groupId:f.group.id,editionId:first.edition.id},view=await store.status(scope);
  const sending=store.send({confirm:true,retryUncertain:true,expectedRevision:view.revision,drawId:view.draw.completedAt,revision:view.delivery.revision},scope);
- try{await started;await f.write(f.makePlan('manual',{target:{newGroup:'During sending'}}));await assert.rejects(f.preview(),/ocupado/);}finally{finish();await sending;}
+ try{await started;await f.write(f.makePlan('manual',{target:{newGroup:'During sending'}}));await f.preview();}finally{finish();await sending;}
  assert.equal(sent,3);
 });
-test('CLI summaries, errors and public endpoints do not reveal private contacts, assignments or source paths; storage stays encrypted v5',async()=>{
+test('CLI summaries, errors and public endpoints do not reveal private contacts, assignments or source paths; storage stays encrypted v6',async()=>{
  const f=await fixture();await f.write(f.makePlan('assignments'));const preview=await run(args(f));assert.equal(preview.code,0);const p=JSON.parse(preview.stdout);assert.equal(p.imported,false);
  const imported=await run([...args(f),'--confirm',p.confirmation]);assert.equal(imported.code,0);assert.equal(JSON.parse(imported.stdout).unknownDeliveries,3);
  await fs.writeFile(f.options.source,'{"secret":"private-raw-content"');const bad=await run(args(f));assert.equal(bad.code,1);
@@ -146,12 +146,12 @@ test('CLI summaries, errors and public endpoints do not reveal private contacts,
  const store=new LocalStore(f.options.data,15,{configured:false,send:()=>assert.fail('No SMTP')},f.options.key),app=createApp(store);
  for(const url of [`/api/groups/${f.group.id}`,`/api/groups/${f.group.id}/editions/${editions[0].id}`]){const r=await app.fetch(new Request('http://localhost'+url));assert.equal(r.status,200);assert.doesNotMatch(await r.text(),/assignments|receiver|history_sequence|restrictions/);}
  const bytes=await fs.readFile(f.options.data);for(const r of f.records){assert.equal(bytes.includes(Buffer.from(r.name)),false);assert.equal(bytes.includes(Buffer.from(r.email)),false);}
- const sql=new DatabaseSync(f.options.data);try{assert.equal(sql.prepare('PRAGMA user_version').get().user_version,5);for(const row of sql.prepare('SELECT private FROM assignments').all())assert.equal(Buffer.from(row.private)[0],1);}finally{sql.close();}
+ const sql=new DatabaseSync(f.options.data);try{assert.equal(sql.prepare('PRAGMA user_version').get().user_version,6);for(const row of sql.prepare('SELECT private FROM assignments').all())assert.equal(Buffer.from(row.private)[0],1);}finally{sql.close();}
 });
 test('import refuses uninitialized or older storage without creating a key or running migrations',async()=>{
  const f=await fixture();await f.write();const missing={...f.options,data:path.join(f.root,'missing/state.sqlite'),key:path.join(f.root,'missing-key/key')};
  await assert.rejects(importCli(missing));await assert.rejects(fs.stat(missing.data),{code:'ENOENT'});await assert.rejects(fs.stat(missing.key),{code:'ENOENT'});
- const sql=new DatabaseSync(f.options.data);sql.exec('PRAGMA user_version=2');sql.close();const before=await fs.readFile(f.options.data);await assert.rejects(f.preview(),/SQLite v5/);assert.deepEqual(await fs.readFile(f.options.data),before);
+ const sql=new DatabaseSync(f.options.data);sql.exec('PRAGMA user_version=2');sql.close();const before=await fs.readFile(f.options.data);await assert.rejects(f.preview(),/SQLite v6/);assert.deepEqual(await fs.readFile(f.options.data),before);
 });
 test('legacy CLI keeps Base64 round trip and draw/mail behavior without SMTP',async()=>{
  const {readJson}=require('../build/utils/commonUtils'),{createNewSecretGiftList,createMailList}=require('../build/drawParticipants');

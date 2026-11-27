@@ -155,12 +155,20 @@ HOST='smtp.example.invalid'
 PORT='587'
 MAILUSER='usuario-smtp'
 MAILPWD='contraseña-smtp'
+SMTP_SEND_INTERVAL_MS=10000
 ```
 
 Usa los valores de tu servidor SMTP; el puerto 465 utiliza TLS directo. Si el
 servidor no requiere autenticación, deja `MAILUSER` y `MAILPWD` vacíos.
 Recrea la aplicación con `docker compose up --build`. Sin SMTP configurado
 puedes preparar y confirmar el sorteo, pero no enviar correos.
+
+Web y CLI esperan entre el cierre de un intento SMTP y el inicio del siguiente.
+`SMTP_SEND_INTERVAL_MS` acepta enteros entre `0` y `60000` y vale `10000`
+si se omite. `0` deja los envíos en serie sin pausa. Compose pasa el valor de
+`.env` a la web. Un valor inválido bloquea el envío. La política se aplica en
+pruebas y en producción dentro de cada proceso. Evita ejecutar la web y la CLI
+simultáneamente con la misma cuenta si necesitas respetar ese intervalo.
 
 Configura `APP_MODE=test` para dirigir **todos los mensajes exclusivamente a
 `TEST_EMAIL`**, una única dirección sin nombre visible. Web y CLI aplican la misma
@@ -176,13 +184,17 @@ los envíos; no se sustituye el buzón de pruebas por direcciones reales.
 SMTP existentes se conservan.
 
 Abre el sorteo y pulsa «Enviar … notificaciones». La web muestra el modo y, en
-pruebas, el buzón efectivo; la confirmación indica el número de mensajes.
+pruebas, el buzón efectivo. La confirmación indica cuántos mensajes se van a
+intentar. La barra y los contadores se actualizan mientras la web envía en
+segundo plano. Puedes salir y volver a abrir la edición para consultar el estado.
 Los resultados de pruebas y producción se conservan por separado para cada edición:
 `pending` (pendiente), `failed` (rechazo), `uncertain` (resultado incierto) y
 `accepted` (aceptado por SMTP, sin garantizar recepción). Los aceptados no se
 reenvían en ese modo; reenviar inciertos requiere confirmación adicional y puede
-producir duplicados. «Actualizar estado» consulta el progreso. Un error HTTP se
-muestra como alerta; completar una solicitud no significa que todos fueran aceptados.
+producir duplicados. Tras una interrupción, los intentos en curso pueden quedar
+inciertos y los pendientes se conservan. Los envíos se continúan con una nueva
+confirmación explícita. Si el servidor indica un límite de frecuencia, se
+detiene la operación y los mensajes restantes conservan sus estados.
 Los recordatorios tienen campañas independientes; reintenta la campaña fallida
 en lugar de crear otra si quieres evitar duplicar los mensajes ya aceptados.
 Las campañas de prueba solo pueden reintentarse en modo pruebas, y las de
@@ -193,8 +205,9 @@ Para cambiar de modo, actualiza tu `.env` privado y recrea la aplicación con
 Cambiar de modo no envía nada. Las aceptaciones de prueba no completan entregas
 reales: en producción será necesaria otra confirmación. Cambiar `TEST_EMAIL` no
 reinicia los estados de prueba ni reenvía los ya aceptados; usa otra edición si
-necesitas una nueva tanda. Mientras hay un envío activo se bloquean escrituras;
-si otra pestaña modifica la edición, actualiza antes de confirmar de nuevo.
+necesitas una nueva tanda. Mientras hay un envío activo se bloquean otros envíos y cambios incompatibles
+de la misma edición. Si otra pestaña modifica la edición, actualiza antes de
+confirmar de nuevo.
 
 Para una prueba SMTP real posterior, con autorización del organizador: configura
 `APP_MODE=test`, un buzón propio y el SMTP del proveedor; recrea, recarga y verifica
@@ -213,7 +226,7 @@ si son restricciones manuales (`manual`) o asignaciones generadas (`assignments`
 el nombre del archivo no determina su significado. Prepara las asociaciones con
 IDs existentes, altas nuevas u omisiones según el [formato del plan](docs/storage.md#importación-explícita-de-la-cli).
 
-Con Node.js 26 y `npm ci`, usa una instalación web ya inicializada en SQLite v5.
+Con Node.js 26 y `npm ci`, usa una instalación web ya inicializada en SQLite v6.
 Antes de confirmar, detén la web y [copia la base y su clave](#datos-migración-y-copias).
 Guarda el origen y el plan en una carpeta privada excluida de Git, como `.task/import`:
 
@@ -263,7 +276,7 @@ JSON
 Los nombres y correos deben ser únicos. `lastGift` es el nombre de otro
 participante que recibió el regalo el año anterior, o `""` si no existe.
 
-**La CLI envía según `APP_MODE`, sin los contadores persistidos de la web.** Ejecuta:
+**La CLI envía según `APP_MODE` y espera hasta terminar.** Muestra el número de intentos procesados y carece del historial de entregas de la web. Ejecuta:
 
 ```bash
 npm start

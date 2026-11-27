@@ -9,6 +9,7 @@ export interface StateResponse {
     schedule?: Schedule;
     results?: { available: boolean; reason: 'scheduled' | 'missing-date' | 'unconfirmed' };
     campaigns?: CampaignSummary[];
+    mailOperation?: MailOperation;
     scope?: EditionScope;
     revision?: string;
     delivery?: {
@@ -48,3 +49,13 @@ export interface DeliveryCounts { pending: number; accepted: number; failed: num
 export interface CampaignSummary extends DeliveryCounts { id: string; createdAt: string; mode: 'test' | 'production'; revision: string }
 export interface ResultsResponse { assignments: { giver: { id: string; name: string }; receiver: { id: string; name: string } }[] }
 export interface RestrictionPreview { schedule?: Schedule; viable: boolean; restrictions: { personId: string; source: 'verified' | 'manual' | 'none'; previousId?: string }[] }
+
+export interface MailOperation {
+    id: string;
+    mode: 'test' | 'production';
+    kind: 'initial' | 'reminder' | 'retryInitial' | 'retryReminder';
+    campaignId?: string;
+    status: 'running' | 'finished' | 'limited' | 'interrupted';
+    total: number;
+    processed: number;
+}

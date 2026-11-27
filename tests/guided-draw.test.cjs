@@ -1,3 +1,4 @@
+const { waitForMail } = require('./helpers/mail-progress.cjs');
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs/promises');
@@ -65,23 +66,24 @@ test('repeat uses forkEdition to create a distinct confirmed edition, retains or
 });
 test('reminders resend original pairs to all including initial accepted and retain independent campaigns, revisions and retry uncertainty',async()=>{
  let mode='accepted',calls=[];const mail={mode:'test',configured:true,send:async m=>{calls.push(m);return mode;}};const f=await fixture(mail);const created=await f.create(),e=created.data.editions.find(e=>e.draw.completed),scope=f.scope(e),url=f.base+'/editions/'+e.edition.id;
+ const sendReminder=async(path,body)=>{const r=await f.request(path,body);if(r.status===202)r.data=await waitForMail(()=>f.store.status(scope));return r;};
  let s=await f.store.status(scope);await f.store.send(sendPayload(s),scope);assert.equal(calls.length,4);const before=await f.read(e);
- s=await f.store.status(scope);const payload=sendPayload(s);let r=await f.request(url+'/reminders',payload);assert.equal(r.status,200);assert.equal(calls.length,8);assert.equal(r.data.campaigns.length,1);assert.equal(r.data.campaigns[0].accepted,4);assert.equal(r.data.delivery.accepted,4);assert.equal(r.data.results.available,false);
- assert.deepEqual(calls.slice(0,4),calls.slice(4,8));assert.equal((await f.request(url+'/reminders',payload)).status,409);
- mode='uncertain';s=await f.store.status(scope);r=await f.request(url+'/reminders',sendPayload(s));assert.equal(r.data.campaigns.length,2);const c=r.data.campaigns[1];assert.equal(c.uncertain,4);assert.equal(calls.length,12);
- mode='accepted';s=await f.store.status(scope);r=await f.request(url+'/reminders/'+c.id+'/send',{...sendPayload(s),revision:c.revision});assert.equal(r.status,200);assert.equal(calls.length,12);
- const current=r.data.campaigns[1];r=await f.request(url+'/reminders/'+c.id+'/send',{...sendPayload(r.data),revision:current.revision,retryUncertain:true});assert.equal(r.status,200);assert.equal(calls.length,16);assert.equal(r.data.campaigns[1].accepted,4);
+ s=await f.store.status(scope);const payload=sendPayload(s);let r=await sendReminder(url+'/reminders',payload);assert.equal(r.status,202);assert.equal(calls.length,8);assert.equal(r.data.campaigns.length,1);assert.equal(r.data.campaigns[0].accepted,4);assert.equal(r.data.delivery.accepted,4);assert.equal(r.data.results.available,false);
+ assert.deepEqual(calls.slice(0,4),calls.slice(4,8));assert.equal((await sendReminder(url+'/reminders',payload)).status,409);
+ mode='uncertain';s=await f.store.status(scope);r=await sendReminder(url+'/reminders',sendPayload(s));assert.equal(r.data.campaigns.length,2);const c=r.data.campaigns[1];assert.equal(c.uncertain,4);assert.equal(calls.length,12);
+ mode='accepted';s=await f.store.status(scope);r=await sendReminder(url+'/reminders/'+c.id+'/send',{...sendPayload(s),revision:c.revision});assert.equal(r.status,202);assert.equal(calls.length,12);
+ const current=r.data.campaigns[1];r=await sendReminder(url+'/reminders/'+c.id+'/send',{...sendPayload(r.data),revision:current.revision,retryUncertain:true});assert.equal(r.status,202);assert.equal(calls.length,16);assert.equal(r.data.campaigns[1].accepted,4);
  assert.deepEqual((await f.read(e)).draw.assignments,before.draw.assignments);assert.deepEqual((await f.read(e)).draw.deliveries,before.draw.deliveries);
  const restart=new LocalStore(f.file,15,mail,f.key);assert.equal((await restart.status(scope)).campaigns.length,2);
  const prod=new LocalStore(f.file,15,{...mail,mode:'production'},f.key);s=await prod.status(scope);await assert.rejects(prod.send({...sendPayload(s),revision:s.campaigns[0].revision},scope,c.id),e=>e.status===409);
 });
 test('v4 migration preserves ciphertext, key and delivery states; rolls back dates and campaign tables on failure',async()=>{
  const f=await fixture();const r=await f.create({schedule:undefined,confirmDraw:undefined}),e=r.data.editions.at(-1);const before=await f.read(e),key=await fs.readFile(f.key);
- let db=new DatabaseSync(f.file);const rows=db.prepare('SELECT private FROM participants').all().map(r=>Buffer.from(r.private));db.exec('DROP TABLE campaign_deliveries; DROP TABLE mail_campaigns; ALTER TABLE editions DROP COLUMN schedule; PRAGMA user_version=4');db.close();const bytes=await fs.readFile(f.file),exec=DatabaseSync.prototype.exec;
+ let db=new DatabaseSync(f.file);const rows=db.prepare('SELECT private FROM participants').all().map(r=>Buffer.from(r.private));db.exec('DROP TABLE mail_operations; DROP TABLE campaign_deliveries; DROP TABLE mail_campaigns; ALTER TABLE editions DROP COLUMN schedule; PRAGMA user_version=4');db.close();const bytes=await fs.readFile(f.file),exec=DatabaseSync.prototype.exec;
  DatabaseSync.prototype.exec=function(sql){if(sql==='PRAGMA user_version=5')throw new Error('Synthetic v5 failure');return exec.call(this,sql);};
  try{await assert.rejects(f.open(),/Synthetic v5 failure/);}finally{DatabaseSync.prototype.exec=exec;}
  assert.deepEqual(await fs.readFile(f.file),bytes);assert.deepEqual(await fs.readFile(f.key),key);db=await f.open();assert.deepEqual(db.readEdition(f.scope(e).groupId,e.edition.id),before);db.close();
- db=new DatabaseSync(f.file);try{assert.equal(db.prepare('PRAGMA user_version').get().user_version,5);assert.deepEqual(db.prepare('SELECT private FROM participants').all().map(r=>Buffer.from(r.private)),rows);}finally{db.close();}
+ db=new DatabaseSync(f.file);try{assert.equal(db.prepare('PRAGMA user_version').get().user_version,6);assert.deepEqual(db.prepare('SELECT private FROM participants').all().map(r=>Buffer.from(r.private)),rows);}finally{db.close();}
 });
 test('draft schedule changes invalidate optimistic revisions, while browser dates cannot bypass an undated historical gate',async()=>{
  const f=await fixture();const r=await f.create({schedule:undefined,confirmDraw:undefined}),e=r.data.editions.at(-1),scope=f.scope(e),url=f.base+'/editions/'+e.edition.id;const stale=await f.store.status(scope);
@@ -100,7 +102,7 @@ test('reminder transport stays redirected through partial rejection and connecti
  const nodemailer=require('nodemailer'),{smtpSender}=require('../build/web/mail');const original=nodemailer.createTransport,delivered=[];let partial=true;
  nodemailer.createTransport=()=>({sendMail:async m=>{delivered.push(m);const n=delivered.length;if(partial&&n===2)throw {responseCode:550};if(partial&&n===3)throw {code:'ECONNECTION'};return {accepted:[m.to]};},close(){}});
  try{
-  const env={APP_MODE:'test',TEST_EMAIL:'test@example.invalid',HOST:'smtp.example.invalid',PORT:'465',FROM:'sender@example.invalid'};
+  const env={SMTP_SEND_INTERVAL_MS:"0",APP_MODE:'test',TEST_EMAIL:'test@example.invalid',HOST:'smtp.example.invalid',PORT:'465',FROM:'sender@example.invalid'};
   const f=await fixture(smtpSender(env)),r=await f.create(),e=r.data.editions.find(e=>e.draw.completed),scope=f.scope(e);let s=await f.store.status(scope);
   s=await f.store.send(sendPayload(s),scope,'new');let c=s.campaigns[0];assert.equal(c.accepted,2);assert.equal(c.failed,1);assert.equal(c.uncertain,1);assert.equal(s.delivery.pending,4);
   partial=false;s=await f.store.send({...sendPayload(s),revision:c.revision},scope,c.id);assert.equal(delivered.length,5);c=s.campaigns[0];assert.equal(c.accepted,3);assert.equal(c.uncertain,1);
@@ -116,9 +118,9 @@ test('concurrent reminder requests cannot duplicate a campaign and post-acceptan
  const first=f.store.send(input,scope,'new');await ready;let s=await f.store.status(scope);assert.equal(s.campaigns.length,1);assert.equal(s.campaigns[0].uncertain,1);
  await assert.rejects(f.store.send(input,scope,'new'),e=>e.status===409);const other=new LocalStore(f.file,15,{mode:'test',configured:true,send:async()=>assert.fail('Duplicate')},f.key);await assert.rejects(other.send(input,scope,'new'),e=>e.status===409);
  resume();await first;assert.equal(calls,4);
- const original=EncryptedDatabase.prototype.updateCampaign;let attempted=false;
- const failing=new LocalStore(f.file,15,{mode:'test',configured:true,send:async()=>{attempted=true;EncryptedDatabase.prototype.updateCampaign=()=>{throw new Error('Synthetic campaign persistence failure');};return 'accepted';}},f.key);
- try{await assert.rejects(failing.send(sendPayload(await failing.status(scope)),scope,'new'),/Synthetic campaign persistence failure/);}finally{EncryptedDatabase.prototype.updateCampaign=original;}
+ const original=EncryptedDatabase.prototype.recordMailAttempt;let attempted=false;
+ const failing=new LocalStore(f.file,15,{mode:'test',configured:true,send:async()=>{attempted=true;EncryptedDatabase.prototype.recordMailAttempt=()=>{throw new Error('Synthetic campaign persistence failure');};return 'accepted';}},f.key);
+ try{await assert.rejects(failing.send(sendPayload(await failing.status(scope)),scope,'new'),/Synthetic campaign persistence failure/);}finally{EncryptedDatabase.prototype.recordMailAttempt=original;}
  assert.equal(attempted,true);s=await other.status(scope);assert.equal(s.campaigns.length,2);assert.equal(s.campaigns[1].uncertain,1);assert.equal(s.campaigns[1].pending,3);assert.equal(s.campaigns[1].accepted,0);assert.equal(s.delivery.pending,4);
 });
 test('the existing configurable limit supports a hundred participants with complete manual relations in one bounded HTTP request',async()=>{
@@ -131,4 +133,32 @@ test('confirmed schedules cannot be edited through repository operations and dat
  let db=await f.open();try{assert.throws(()=>db.configureEdition(f.scope(e).groupId,e.edition.id,'Change',2026,resolveSchedule({localDateTime:'2026-12-01T00:00',timeZone:'UTC'})),/immutable/);}finally{db.close();}
  const bytes=await fs.readFile(f.file);assert.equal(bytes.includes(Buffer.from('2026-12-24T19:00:00.000Z')),false);
  db=new DatabaseSync(f.file);const blob=db.prepare('SELECT schedule FROM editions WHERE id=?').get(e.edition.id).schedule;db.prepare('UPDATE editions SET schedule=? WHERE id=?').run(blob,next.edition.id);db.close();await assert.rejects(f.open());
+});
+
+test('v5 to v6 adds only mail operation metadata and rolls back a failed migration', async () => {
+ const f = await fixture(), r = await f.create(), edition = r.data.editions.find(e => e.draw.completed);
+ const original = await f.read(edition);
+ const key = await fs.readFile(f.key);
+ let db = new DatabaseSync(f.file);
+ db.exec('DROP TABLE mail_operations; PRAGMA user_version=5');
+ const encrypted = db.prepare('SELECT private FROM assignments ORDER BY giver').all().map(row => Buffer.from(row.private));
+ db.close();
+ const exec = DatabaseSync.prototype.exec;
+ DatabaseSync.prototype.exec = function(sql) {
+  if (sql === 'PRAGMA user_version=6') throw new Error('Synthetic v6 failure');
+  return exec.call(this, sql);
+ };
+ try { await assert.rejects(f.open(), /Synthetic v6 failure/); }
+ finally { DatabaseSync.prototype.exec = exec; }
+ db = new DatabaseSync(f.file);
+ assert.equal(db.prepare('PRAGMA user_version').get().user_version, 5);
+ assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name='mail_operations'").get(), undefined);
+ db.close();
+ assert.deepEqual(await f.read(edition), original);
+ assert.deepEqual(await fs.readFile(f.key), key);
+ db = new DatabaseSync(f.file);
+ assert.equal(db.prepare('PRAGMA user_version').get().user_version, 6);
+ assert.deepEqual(db.prepare('SELECT private FROM assignments ORDER BY giver').all().map(row => Buffer.from(row.private)), encrypted);
+ assert.equal(db.prepare('SELECT COUNT(*) AS total FROM mail_operations').get().total, 0);
+ db.close();
 });
