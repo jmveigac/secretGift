@@ -110,6 +110,35 @@ selección del navegador; la nueva interfaz utiliza exclusivamente rutas con
 lista explícita de campos de `StateResponse`. Los antecedentes intervienen internamente en el algoritmo sin exponerse en estas respuestas.
 
 
+## Eliminación definitiva de grupos
+
+`GET /api/groups/:g/deletion` devuelve el nombre, el número de personas,
+ediciones y campañas, y una revisión HMAC específica para la eliminación.
+`DELETE /api/groups/:g` exige esa revisión en `expectedRevision` y el nombre
+en `confirmationName`. La revisión cubre también las instantáneas y los
+estados de correo. Una confirmación obsoleta o un envío activo devuelven 409.
+Los intentos pendientes o inciertos sin una reserva activa pueden eliminarse.
+
+El bloqueo de almacenamiento coordina la eliminación con la reserva de envíos
+y las demás mutaciones. Si una fila indica una operación en ejecución, se
+comprueba además el bloqueo de su edición. Una reserva interrumpida que ya
+no tiene propietario no impide eliminar el grupo. SQLite realiza en una sola
+transacción el borrado de `mail_operations`, `campaign_deliveries`,
+`mail_campaigns`, `compatibility` si corresponde, `assignments`, `draw`,
+`participants`, `editions`, `people` y `groups`. El esquema permanece en v6
+y se conservan la clave, los metadatos globales y los otros grupos.
+
+Si se elimina el grupo al que apunta `compatibility`, se retira el puntero.
+Las rutas antiguas sin ámbito responden 409 mientras no tengan una edición
+de compatibilidad. Las rutas con grupo y edición siguen disponibles. Al borrar
+el último grupo, el arranque valida y conserva la base vacía. Crear otro grupo
+no lo convierte en destino de las rutas antiguas.
+
+SQLite puede reutilizar las páginas liberadas. La eliminación no ejecuta
+`VACUUM` ni garantiza borrado forense de páginas antiguas, diarios, WAL o
+copias de seguridad. Los correos ya enviados permanecen fuera del control de
+la aplicación.
+
 ## Orden histórico y restricciones (v3)
 
 La migración v2→v3 añade a `draw` `history_sequence` (entero positivo nullable),

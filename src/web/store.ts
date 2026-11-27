@@ -1,12 +1,13 @@
 import { resolveSchedule, type Schedule } from '../domain/schedule';
 import { dirname, resolve, join } from 'node:path';
 import { randomUUID, randomInt } from 'node:crypto';
+import { normalizeGroupName } from '../domain/group-name';
 import { drawParticipants } from '../domain/draw';
 import { validateState, type State, type Delivery } from '../domain/editions';
 import type { Participant, StateResponse, EditionScope, GroupResponse, Person, ResultsResponse, RestrictionPreview, MailOperation } from './contracts';
 import { smtpSender, type MailSender } from './mail';
 import { storageLock } from './lock';
-import { EncryptedDatabase, MissingDatabaseError, type Campaign } from './database';
+import { EncryptedDatabase, MissingDatabaseError, NoCompatibilityError, type Campaign } from './database';
 export type { Participant } from './contracts';
 
 export class AppError extends Error {
@@ -85,7 +86,7 @@ export class LocalStore {
                 }
                 let state: State;
                 try { state = await this.read(scope); } catch (error) {
-                    if (error instanceof MissingDatabaseError || error instanceof AppError) throw error;
+                    if (error instanceof MissingDatabaseError || error instanceof NoCompatibilityError || error instanceof AppError) throw error;
                     throw new Error('Storage unavailable');
                 }
                 return await operation(state);
@@ -137,9 +138,39 @@ export class LocalStore {
     }
     groups() { return this.database(db => ({ groups: db.listGroups() })); }
     group(groupId: string) { return this.database(db => this.groupView(db, groupId)); }
+    async groupDeletionSummary(groupId: string) {
+        const summary = await this.database(db => db.groupDeletionSummary(groupId));
+        if (!summary) throw new AppError(404, 'Grupo no encontrado.');
+        return summary;
+    }
+    async deleteGroup(groupId: string, input: unknown) {
+        if (!input || typeof input !== 'object' || Array.isArray(input)) throw invalid();
+        const { expectedRevision, confirmationName } = input as Record<string, unknown>;
+        const name = normalizeGroupName(confirmationName);
+        if (Object.keys(input).some(k => k !== 'expectedRevision' && k !== 'confirmationName') ||
+            typeof expectedRevision !== 'string' || !name) throw new AppError(400, 'Confirma el nombre del grupo y su revisión.');
+        const release = await this.takeWriteLock();
+        const mailLocks: (() => Promise<void>)[] = [];
+        try {
+            // Reservations use the write lock first and hold an edition lock until SMTP finishes.
+            // A running row without an owner may be left over from an interrupted process.
+            const running = await this.database(db => db.runningMailEditions(groupId));
+            for (const scope of running) {
+                try { mailLocks.push(await storageLock(this.mailLockPath(scope))); }
+                catch { throw new AppError(409, 'Hay un envío activo en el grupo. Espera antes de eliminarlo.'); }
+            }
+            return await this.database(db => db.deleteGroup(groupId, summary => {
+                if (!summary) throw new AppError(404, 'Grupo no encontrado.');
+                if (summary.revision !== expectedRevision) throw new AppError(409, 'El grupo ha cambiado. Vuelve a revisar la eliminación.');
+                if (name !== summary.name) throw new AppError(400, 'El nombre de confirmación no coincide.');
+            }));
+        } finally {
+            try { await Promise.all(mailLocks.map(unlock => unlock())); }
+            finally { await release(); }
+        }
+    }
     private cleanName(value: unknown): string {
-        if (typeof value !== 'string' || value.length > 100 || /[\x00-\x1f\x7f]/.test(value)) throw invalid();
-        const name = value.trim().replace(/\s+/g, ' ');
+        const name = normalizeGroupName(value);
         if (!name) throw invalid();
         return name;
     }

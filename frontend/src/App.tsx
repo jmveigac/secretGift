@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { groupsApi, editionApi, type Group, type GroupResponse } from './api';
+import DeleteGroup from './DeleteGroup';
 import GroupPeople from './GroupPeople';
 import DrawWizard, { type ReferenceDraw } from './DrawWizard';
 import DrawDetail, { eventLabel } from './DrawDetail';
@@ -11,6 +12,7 @@ export default function App() {
     const [view, setView] = useState<View>('groups'), [tab, setTab] = useState<'draws' | 'people' | 'settings'>('draws');
     const [editionId, setEditionId] = useState(''), [reference, setReference] = useState<ReferenceDraw>();
     const [pending, setPending] = useState(true), [childBusy, setChildBusy] = useState(false), [error, setError] = useState('');
+    const [notice, setNotice] = useState('');
     const [name, setName] = useState(''), [rename, setRename] = useState('');
     const lock = useRef(false), heading = useRef<HTMLHeadingElement>(null);
     const busy = pending || childBusy;
@@ -20,13 +22,18 @@ export default function App() {
     async function refreshGroup() { if (group) setGroup(await groupsApi.get(group.group.id)); }
     async function run(operation: () => Promise<void>) {
         if (lock.current || busy) { setError('Espera a que termine la solicitud en curso.'); return false; }
-        lock.current = true; setPending(true); setError('');
+        lock.current = true; setPending(true); setError(''); setNotice('');
         try { await operation(); return true; } catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudo completar la operación.'); return false; }
         finally { lock.current = false; setPending(false); }
     }
     function navigate(next: View) { if (busy || lock.current || next === view && (view === 'new' || view === 'repeat' && reference)) return; if ((view === 'new' || view === 'repeat' && reference) && !window.confirm('¿Salir del sorteo en preparación? Los datos de este asistente no se guardarán.')) return; setView(next); setEditionId(''); setReference(undefined); setError(''); if (next === 'groups') { setGroup(undefined); setTab('draws'); } }
     function openGroup(id: string) { void run(async () => { const next = await groupsApi.get(id); setGroup(next); setRename(next.group.name); setEditionId(''); setTab('draws'); }); }
     async function createGroup(event: FormEvent) { event.preventDefault(); await run(async () => { const next = await groupsApi.create(name); setGroup(next); setRename(next.group.name); setName(''); setTab('people'); await listGroups(); }); }
+    function groupDeleted(remaining: Group[]) {
+        setGroups(remaining); setGroup(undefined); setEditionId(''); setReference(undefined);
+        setRename(''); setTab('draws'); setView('groups'); setError('');
+        setNotice('Grupo eliminado definitivamente.');
+    }
     function prepareRepeat() {
         if (!group || !editionId) return;
         void run(async () => { const state = await editionApi({ groupId: group.group.id, editionId }).state(); const source = group.editions.find(e => e.edition.id === editionId)!; setReference({ id: editionId, name: source.edition.name, personIds: state.participants.map(p => p.id) }); });
@@ -42,7 +49,7 @@ export default function App() {
         </aside>
         <main id="workspace" tabIndex={-1}>
         <div className="workspace-label"><span>Organiza tu amigo invisible</span><span className="local-label">Espacio local</span></div>
-        {error && <p role="alert">{error}</p>}{pending && <p role="status">Cargando o guardando datos…</p>}
+        {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}{pending && <p role="status">Cargando o guardando datos…</p>}
         {wizard ? <DrawWizard key={`${view}:${reference?.id ?? 'new'}`} groups={groups} initialGroup={group} reference={reference} onBusy={setChildBusy} onGroupsChanged={listGroups} onDone={(next, id) => { setGroup(next); setEditionId(id); setView('groups'); setTab('draws'); setReference(undefined); }} /> : <>
             {view === 'groups' && !group && <section aria-labelledby="groups-heading"><div className="section-heading"><div><p className="eyebrow">Tu punto de partida</p><h2 id="groups-heading" ref={heading} tabIndex={-1}>Mis grupos</h2><p className="section-lead">Reúne a tu gente. Prepara el próximo sorteo.</p></div><button className="secondary" disabled={busy} onClick={() => { void run(listGroups); }}>Actualizar grupos</button></div>
                 {!groups.length && <div className="empty-state"><span className="empty-mark" aria-hidden="true">01</span><div><h3>Tu primer grupo empieza aquí</h3><p>No hay grupos todavía. Crea uno para preparar tu primer sorteo.</p></div></div>}
@@ -59,7 +66,9 @@ export default function App() {
                 {group.busy && <p role="status">Hay un envío en curso. Actualiza el grupo cuando termine.</p>}
                 <nav className="sub-nav" aria-label="Secciones del grupo">{(['draws', 'people', 'settings'] as const).map(id => <button key={id} aria-current={tab === id ? 'page' : undefined} className={tab === id ? 'nav-active' : 'nav-item'} disabled={busy} onClick={() => { setTab(id); setEditionId(''); }}>{id === 'draws' ? 'Sorteos' : id === 'people' ? 'Participantes' : 'Ajustes'}</button>)}</nav>
                 {tab === 'people' && <GroupPeople key={group.group.id} people={group.people} disabled={busy || group.busy} onSave={(person, id) => run(async () => setGroup(await groupsApi.person(group, person, id)))} />}
-                {tab === 'settings' && <section><h3>Nombre del grupo</h3><form onSubmit={e => { e.preventDefault(); void run(async () => { const next = await groupsApi.rename(group, rename); setGroup(next); await listGroups(); }); }}><label htmlFor="rename-group">Nombre</label><input id="rename-group" value={rename} onChange={e => setRename(e.target.value)} required maxLength={100} disabled={busy || group.busy} /><button disabled={busy || group.busy}>Guardar nombre</button></form></section>}
+                {tab === 'settings' && <><section><h3>Nombre del grupo</h3><form onSubmit={e => { e.preventDefault(); void run(async () => { const next = await groupsApi.rename(group, rename); setGroup(next); await listGroups(); }); }}><label htmlFor="rename-group">Nombre</label><input id="rename-group" value={rename} onChange={e => setRename(e.target.value)} required maxLength={100} disabled={busy || group.busy} /><button disabled={busy || group.busy}>Guardar nombre</button></form></section>
+                    <DeleteGroup key={group.group.id} groupId={group.group.id} disabled={busy} onBusy={setChildBusy} onDeleted={groupDeleted} />
+                </>}
                 {tab === 'draws' && !selected && <section aria-label="Historial de sorteos"><div className="section-heading"><h3>Historial de sorteos</h3><span className="badge">{group.editions.length} ediciones</span></div>{!group.editions.length && <p>No hay sorteos todavía. Crea el primero para reunir a este grupo.</p>}<div className="draw-grid">{group.editions.map(e => <article className="draw-card" key={e.edition.id}><div className="section-heading"><h4>{e.edition.name}</h4><span className={`badge ${e.draw.completed ? 'badge-confirmed' : 'badge-draft'}`}>{e.draw.completed ? 'Confirmado' : 'Borrador'}</span></div><p>{e.edition.year} · {eventLabel(e)}</p><p>{e.draw.participantCount} participantes · {e.results?.available ? 'Resultados disponibles' : 'Asignaciones ocultas'}</p><p className="delivery-summary">Correos · {e.delivery?.mode === 'test' ? 'pruebas' : e.delivery?.mode === 'production' ? 'producción' : 'sin configurar'}<br /><strong>{e.delivery?.accepted ?? 0} aceptados</strong>{!!((e.delivery?.failed ?? 0) + (e.delivery?.uncertain ?? 0)) ? ' · Hay entregas que revisar' : ` · ${e.delivery?.pending ?? 0} pendientes`}</p><button className="secondary" disabled={busy} onClick={() => setEditionId(e.edition.id)}>Abrir {e.edition.name}</button></article>)}</div></section>}
             </>}
             {group && selected && (view === 'remind' || view === 'groups' && tab === 'draws') && <><button className="secondary" disabled={busy} onClick={() => setEditionId('')}>Volver a sorteos</button><DrawDetail key={`${group.group.id}:${selected.edition.id}`} group={group} edition={selected} reminderOnly={view === 'remind'} onBusy={setChildBusy} onChanged={refreshGroup} /></>}

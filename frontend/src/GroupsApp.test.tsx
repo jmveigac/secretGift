@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from './App';
@@ -192,4 +192,98 @@ it('moves focus to the contact form when editing a person', async () => {
     await user.click(button('Editar contacto de Ana'));
     expect(screen.getByLabelText('Nombre de persona')).toHaveFocus();
     expect(screen.getByLabelText('Nombre de persona')).toHaveValue('Ana');
+});
+
+describe('eliminación de grupos', () => {
+    const deletion = { name: 'Álbum & Fiesta', people: 2, editions: 1, campaigns: 3, revision: 'delete-rev' };
+    const deletionRequests = () => fetchMock.mock.calls.filter(([, init]) => init?.method === 'DELETE');
+
+    beforeEach(() => {
+        Object.defineProperties(HTMLDialogElement.prototype, {
+            showModal: { configurable: true, value(this: HTMLDialogElement) { this.setAttribute('open', ''); } },
+            close: { configurable: true, value(this: HTMLDialogElement) { this.removeAttribute('open'); } },
+        });
+    });
+    afterEach(() => {
+        Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal');
+        Reflect.deleteProperty(HTMLDialogElement.prototype, 'close');
+    });
+
+    async function start(user: ReturnType<typeof userEvent.setup>) {
+        fetchMock.mockResolvedValueOnce(response(deletion));
+        await user.click(button('Eliminar grupo'));
+        return screen.findByRole('dialog');
+    }
+
+    it('muestra los contadores y permite cancelar ambas confirmaciones con foco accesible', async () => {
+        const user = await open();
+        await user.click(button('Ajustes'));
+        let dialog = await start(user);
+        expect(dialog).toHaveTextContent('Álbum & Fiesta');
+        expect(dialog).toHaveTextContent('Personas registradas: 2');
+        expect(dialog).toHaveTextContent('Ediciones: 1');
+        expect(dialog).toHaveTextContent('Campañas de recordatorios: 3');
+        expect(dialog).toHaveTextContent('los correos ya enviados no se pueden retirar');
+        expect(within(dialog).getByRole('button', { name: 'Cancelar' })).toHaveFocus();
+        await user.keyboard('{Enter}');
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+        expect(button('Eliminar grupo')).toHaveFocus();
+        dialog = await start(user);
+        await user.click(within(dialog).getByRole('button', { name: 'Continuar' }));
+        expect(screen.getByLabelText('Escribe el nombre exacto del grupo')).toHaveFocus();
+        expect(button('Eliminar definitivamente')).toBeDisabled();
+        fireEvent(dialog, new Event('cancel', { cancelable: true }));
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+        expect(deletionRequests()).toHaveLength(0);
+    });
+
+    it('valida el nombre, envía una sola petición y actualiza la lista y los selectores', async () => {
+        const user = await open();
+        await user.click(button('Ajustes'));
+        await start(user);
+        await user.click(button('Continuar'));
+        const input = screen.getByLabelText('Escribe el nombre exacto del grupo');
+        const remove = button('Eliminar definitivamente');
+        await user.type(input, 'álbum & Fiesta');
+        expect(remove).toBeDisabled();
+        await user.clear(input);
+        await user.type(input, ' Álbum   & Fiesta ');
+        expect(remove).toBeEnabled();
+        let complete!: (value: Response) => void;
+        fetchMock.mockReturnValueOnce(new Promise(resolve => { complete = resolve; }));
+        fireEvent.click(remove); fireEvent.click(remove);
+        expect(deletionRequests()).toHaveLength(1);
+        expect(deletionRequests()[0][0]).toBe('/api/groups/g');
+        expect(JSON.parse(deletionRequests()[0][1]!.body as string)).toEqual({
+            expectedRevision: deletion.revision, confirmationName: ' Álbum   & Fiesta ',
+        });
+        complete(response({ groups: [{ id: 'h', name: 'Otro grupo' }] }));
+        expect(await screen.findByText('Grupo eliminado definitivamente.')).toBeInTheDocument();
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /Familia.*Abrir grupo/ })).not.toBeInTheDocument();
+        await user.click(button('Recordar sorteo'));
+        expect(await screen.findByRole('option', { name: 'Otro grupo' })).toBeInTheDocument();
+        expect(screen.queryByRole('option', { name: 'Familia' })).not.toBeInTheDocument();
+    });
+
+    it('mantiene el diálogo ante un error y vuelve al estado vacío tras eliminar el último grupo', async () => {
+        const user = await open();
+        await user.click(button('Ajustes'));
+        await start(user);
+        await user.click(button('Continuar'));
+        await user.type(screen.getByLabelText('Escribe el nombre exacto del grupo'), deletion.name);
+        fetchMock.mockResolvedValueOnce(response({ error: 'El grupo ha cambiado. Vuelve a revisar la eliminación.' }, 409));
+        await user.click(button('Eliminar definitivamente'));
+        expect(await screen.findByRole('alert')).toHaveTextContent('El grupo ha cambiado');
+        expect(screen.getByRole('dialog')).toBeInTheDocument();
+        await user.click(button('Cancelar'));
+        await start(user);
+        await user.click(button('Continuar'));
+        await user.type(screen.getByLabelText('Escribe el nombre exacto del grupo'), deletion.name);
+        fetchMock.mockResolvedValueOnce(response({ groups: [] }));
+        await user.click(button('Eliminar definitivamente'));
+        expect(await screen.findByText(/No hay grupos todavía/)).toBeInTheDocument();
+        expect(screen.getByLabelText('Nombre del grupo')).toBeVisible();
+        expect(fetchMock.mock.calls.every(([, init]) => init?.method !== 'POST')).toBe(true);
+    });
 });

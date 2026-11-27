@@ -1,5 +1,5 @@
-import type { ParticipantInput, StateResponse, Group, GroupResponse, EditionScope, ResultsResponse, RestrictionPreview } from '../../src/web/contracts';
-export type { Participant, ParticipantInput, StateResponse, Group, GroupResponse, Person, EditionScope, EditionSummary, CampaignSummary, DeliveryCounts, ResultsResponse, RestrictionPreview } from '../../src/web/contracts';
+import type { ParticipantInput, StateResponse, Group, GroupResponse, GroupDeletionSummary, EditionScope, ResultsResponse, RestrictionPreview } from '../../src/web/contracts';
+export type { Participant, ParticipantInput, StateResponse, Group, GroupResponse, GroupDeletionSummary, Person, EditionScope, EditionSummary, CampaignSummary, DeliveryCounts, ResultsResponse, RestrictionPreview } from '../../src/web/contracts';
 
 async function request<T = StateResponse>(path: string, method = 'GET', body?: unknown, signal?: AbortSignal): Promise<T> {
     const response = await fetch(path, {
@@ -26,6 +26,9 @@ export const api = {
 export const groupsApi = {
     list: () => request<{ groups: Group[] }>('/api/groups'),
     get: (id: string) => request<GroupResponse>(`/api/groups/${id}`),
+    deletion: (id: string) => request<GroupDeletionSummary>(`/api/groups/${id}/deletion`),
+    remove: (id: string, expectedRevision: string, confirmationName: string) =>
+        request<{ groups: Group[] }>(`/api/groups/${id}`, 'DELETE', { expectedRevision, confirmationName }),
     create: (name: string) => request<GroupResponse>('/api/groups', 'POST', { name }),
     rename: (group: GroupResponse, name: string) => request<GroupResponse>(`/api/groups/${group.group.id}`, 'PUT', { name, expectedRevision: group.revision }),
     person: (group: GroupResponse, person: { name: string; email: string; active: boolean }, id?: string) =>

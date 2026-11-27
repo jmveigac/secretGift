@@ -59,3 +59,11 @@ export interface MailOperation {
     total: number;
     processed: number;
 }
+
+export interface GroupDeletionSummary {
+    name: string;
+    people: number;
+    editions: number;
+    campaigns: number;
+    revision: string;
+}
