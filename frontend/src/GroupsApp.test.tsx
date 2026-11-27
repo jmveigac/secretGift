@@ -13,6 +13,7 @@ let group: GroupResponse, state: StateResponse, createStatus: number;
 const base = '/api/groups/g/editions/e';
 function summary(id = 'e', name = 'Navidad'): EditionSummary { return { edition: { id, groupId: 'g', name, year: 2026, schedule }, draw: { completed: true, participantCount: 2, completedAt: '2026-01-01T00:00:00Z' }, delivery, results: { available: false, reason: 'scheduled' } }; }
 beforeEach(() => {
+    history.replaceState(null, '', '/');
     group = { group: { id: 'g', name: 'Familia' }, people: [p('ana', 'Ana'), p('bea', 'Bea')], editions: [summary()], revision: 'group-rev', maxParticipants: 15, busy: false };
     state = { scope: { groupId: 'g', editionId: 'e' }, revision: 'edition-rev', participants: group.people.map(person => ({ ...person, previousId: null })), draw: group.editions[0].draw, maxParticipants: 15, delivery: { ...delivery }, schedule, results: { available: false, reason: 'scheduled' }, campaigns: [] };
     createStatus = 201; fetchMock.mockReset();
@@ -41,17 +42,18 @@ beforeEach(() => {
     vi.stubGlobal('fetch', fetchMock); vi.spyOn(window, 'confirm').mockReturnValue(true);
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
-async function load() { render(<App />); await screen.findByRole('button', { name: /Familia.*Abrir grupo/ }); }
-async function open() { const user = userEvent.setup(); await load(); await user.click(screen.getByRole('button', { name: /Familia.*Abrir grupo/ })); await screen.findByRole('heading', { name: 'Familia' }); return user; }
+async function load() { render(<App />); await screen.findByRole('button', { name: 'Sorteos del grupo' }); }
+async function open() { const user = userEvent.setup(); await load(); await user.click(screen.getByRole('button', { name: 'Sorteos del grupo' })); await screen.findByRole('heading', { name: 'Familia' }); return user; }
 const button = (name: string) => screen.getByRole('button', { name });
+const link = (name: string) => screen.getByRole('link', { name });
 
 it('keeps the header limited to the centered brand and navigates compact views without writes', async () => {
     const user = await open();
     expect(screen.getByRole('banner')).toHaveTextContent(/^secretGift$/);
     const nav = screen.getByRole('navigation', { name: 'Navegación principal' });
-    for (const name of ['Mis grupos', 'Nuevo sorteo', 'Recordar sorteo', 'Repetir sorteo']) expect(within(nav).getByRole('button', { name })).toBeInTheDocument();
+    for (const name of ['Grupos', 'Sorteos', 'Ayuda y herramientas']) expect(within(nav).getByRole('link', { name })).toBeInTheDocument();
     expect(screen.queryByLabelText('Nombre de persona')).not.toBeInTheDocument();
-    await user.click(button('Participantes')); expect(screen.getByLabelText('Nombre de persona')).toBeInTheDocument();
+    await user.click(button('Participantes')); await user.click(button('Añadir persona')); expect(screen.getByLabelText('Nombre de persona')).toBeInTheDocument();
     await user.click(button('Sorteos')); expect(screen.queryByLabelText('Nombre de persona')).not.toBeInTheDocument();
     await user.click(screen.getByText('Ayuda y herramientas'));
     expect(screen.getByRole('link', { name: 'Vista previa del correo' })).toHaveAttribute('href', '/mail-preview');
@@ -63,9 +65,9 @@ it('creates groups and edits contacts without altering historical snapshots', as
     const name = screen.getByLabelText('Nombre de persona'); await user.clear(name); await user.type(name, 'Ana nueva'); await user.click(button('Guardar persona'));
     await screen.findByRole('button', { name: 'Editar contacto de Ana nueva' }); expect(state.participants).toEqual(snapshot);
     await user.click(button('Desactivar a Ana nueva')); await screen.findByRole('button', { name: 'Activar a Ana nueva' }); expect(state.participants).toEqual(snapshot);
-    await user.click(button('Ajustes')); await user.clear(screen.getByLabelText('Nombre')); await user.type(screen.getByLabelText('Nombre'), 'Amistad'); await user.click(button('Guardar nombre'));
+    await user.click(screen.getByText('Acciones del grupo')); await user.click(button('Cambiar nombre')); await user.clear(screen.getByLabelText('Nombre del grupo')); await user.type(screen.getByLabelText('Nombre del grupo'), 'Amistad'); await user.click(button('Guardar nombre'));
     await screen.findByRole('heading', { name: 'Amistad' });
-    await user.click(button('Mis grupos')); await user.click(screen.getByText('Crear grupo', { selector: 'summary' })); await user.type(screen.getByLabelText('Nombre del grupo'), 'Trabajo'); await user.click(button('Guardar grupo'));
+    await user.click(link('Grupos')); await user.click(button('Crear grupo')); await user.type(screen.getByLabelText('Nombre del grupo'), 'Trabajo'); await user.click(button('Guardar grupo'));
     await screen.findByRole('heading', { name: 'Trabajo' }); expect(group.editions).toHaveLength(0);
 });
 it('hides results until the server enables them; changing browser time grants no access', async () => {
@@ -78,7 +80,7 @@ it('hides results until the server enables them; changing browser time grants no
     await user.click(button('Ver resultados')); expect(await screen.findByRole('table')).toHaveTextContent('Ana');
 });
 it('recalls all original assignments with the effective mailbox and campaign-specific results', async () => {
-    const user = await open(); await user.click(button('Recordar sorteo')); await user.selectOptions(screen.getByLabelText('Sorteo confirmado'), 'e');
+    const user = await open(); await user.click(button('Abrir Navidad')); await screen.findByRole('button', { name: 'Recordar sorteo' });
     await screen.findByRole('button', { name: 'Enviar recordatorio a todos' });
     await user.click(button('Enviar recordatorio a todos'));
     expect(window.confirm).toHaveBeenLastCalledWith(expect.stringMatching(/todos.*Navidad.*2 mensajes.*test@example.invalid/));
@@ -86,17 +88,15 @@ it('recalls all original assignments with the effective mailbox and campaign-spe
     expect(fetchMock).toHaveBeenCalledWith(base + '/reminders', expect.objectContaining({ method: 'POST', body: JSON.stringify({ confirm: true, drawId: '2026-01-01T00:00:00Z', expectedRevision: 'edition-rev', revision: 'mail', retryUncertain: false }) }));
 });
 it('repeat proposes a new edition and the previous participants instead of resending', async () => {
-    const user = await open(); await user.click(button('Repetir sorteo')); await user.selectOptions(screen.getByLabelText('Sorteo confirmado'), 'e'); await user.click(button('Preparar nuevo sorteo'));
-    await screen.findByRole('heading', { name: 'Grupo' }); expect(screen.getByLabelText('Grupo del sorteo')).toBeDisabled();
-    await user.click(button('Continuar')); expect(screen.getByText('2 participantes seleccionados · máximo 15')).toBeInTheDocument();
+    const user = await open(); await user.click(button('Abrir Navidad')); await user.click(await screen.findByRole('button', { name: 'Repetir sorteo' }));
+    await screen.findByRole('heading', { name: 'Participantes' }); expect(screen.queryByLabelText('Grupo del sorteo')).not.toBeInTheDocument(); expect(screen.getByText('2 participantes seleccionados · máximo 15')).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([url, init]) => String(url).includes('/reminders') && init?.method === 'POST')).toBe(false);
 });
 async function wizardReview() {
     const user = userEvent.setup();
     render(<DrawWizard groups={[group.group]} initialGroup={group} onBusy={() => {}} onGroupsChanged={async () => {}} onDone={() => {}} />);
-    await user.click(button('Continuar')); await user.click(button('Continuar'));
+    await user.click(button('Continuar')); await user.click(screen.getByText('Antecedentes manuales (opcional)'));
     await user.selectOptions(screen.getByLabelText('Ana regaló a'), 'bea');
-    await user.click(button('Comprobar antecedentes')); await screen.findByLabelText('Título del sorteo');
     await user.type(screen.getByLabelText('Título del sorteo'), 'Cena');
     fireEvent.change(screen.getByLabelText('Fecha del evento'), { target: { value: '2026-12-24' } });
     expect(screen.getByLabelText('Zona horaria')).toHaveValue('Europe/Madrid');
@@ -118,27 +118,30 @@ it('disables navigation and duplicate submissions during a reminder request and 
     const user = await open(); await user.click(button('Abrir Navidad')); await screen.findByRole('button', { name: 'Enviar recordatorio a todos' });
     let finish!: (value: Response) => void; fetchMock.mockReturnValueOnce(new Promise(r => { finish = r; }));
     fireEvent.click(button('Enviar recordatorio a todos')); fireEvent.click(button('Enviar recordatorio a todos'));
-    expect(window.confirm).toHaveBeenCalledTimes(1); expect(button('Mis grupos')).toBeDisabled();
+    expect(window.confirm).toHaveBeenCalledTimes(1); await user.click(link('Grupos')); expect(screen.getByRole('heading', { name: 'Navidad' })).toBeInTheDocument();
     finish(response({ error: 'Hay otra operación en curso.' }, 409)); expect(await screen.findByRole('alert')).toHaveTextContent('Hay otra operación en curso.');
-    await waitFor(() => expect(button('Mis grupos')).toBeEnabled());
+    await user.click(link('Grupos')); await screen.findByRole('heading', { name: 'Grupos' });
     expect(screen.queryByText(/Todos los mensajes de esta solicitud/)).not.toBeInTheDocument();
 });
 it('shows empty and loading error states with a retry control', async () => {
-    fetchMock.mockResolvedValueOnce(response({ groups: [] })); render(<App />); await screen.findByText(/No hay grupos todavía/);
-    fetchMock.mockRejectedValueOnce(new Error('network')); await userEvent.click(button('Actualizar grupos')); expect(await screen.findByRole('alert')).toHaveTextContent('network');
+    fetchMock.mockRejectedValueOnce(new Error('network')); render(<App />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('No se pudieron cargar');
+    fetchMock.mockResolvedValueOnce(response({ groups: [] })); await userEvent.click(button('Volver a intentar'));
+    expect(await screen.findByText(/Crea tu primer grupo/)).toBeInTheDocument();
 });
 it('keeps participant controls labelled and keyboard accessible at a mobile viewport', async () => {
     vi.stubGlobal('innerWidth', 375);
-    const user = await open(); await user.click(button('Nuevo sorteo')); await user.click(button('Continuar'));
+    const user = await open(); await user.click(button('Nuevo sorteo'));
     for (const checkbox of screen.getAllByRole('checkbox')) expect(checkbox).toHaveAccessibleName();
     await user.tab(); expect(screen.getAllByRole('checkbox')[0]).toHaveFocus();
 });
 
 it('validates participant count before requesting a preview and never offers self-relations', async () => {
     const user = userEvent.setup(); render(<DrawWizard groups={[group.group]} initialGroup={group} onBusy={() => {}} onGroupsChanged={async () => {}} onDone={() => {}} />);
-    await user.click(button('Continuar')); await user.click(screen.getByRole('checkbox', { name: /Bea/ })); await user.click(button('Continuar'));
+    await user.click(screen.getByRole('checkbox', { name: /Bea/ })); await user.click(button('Continuar'));
     expect(await screen.findByRole('alert')).toHaveTextContent('Selecciona entre 2 y 15'); expect(fetchMock).not.toHaveBeenCalled();
     await user.click(screen.getByRole('checkbox', { name: /Bea/ })); await user.click(button('Continuar'));
+    await user.click(screen.getByText('Antecedentes manuales (opcional)'));
     expect(within(screen.getByLabelText('Ana regaló a')).queryByRole('option', { name: 'Ana' })).not.toBeInTheDocument();
 });
 it('does not confirm or duplicate a wizard submission while the first is in progress', async () => {
@@ -174,14 +177,13 @@ it('makes production recipients explicit and blocks configuration errors without
 it('keeps the wizard selection when leaving is cancelled and leaves only after confirmation', async () => {
     const user = await open();
     await user.click(button('Nuevo sorteo'));
-    await user.click(button('Continuar'));
     await user.click(screen.getByRole('checkbox', { name: /Bea/ }));
     vi.mocked(window.confirm).mockReturnValueOnce(false);
-    await user.click(button('Mis grupos'));
+    await user.click(link('Grupos'));
     expect(screen.getByRole('checkbox', { name: /Bea/ })).not.toBeChecked();
-    expect(window.confirm).toHaveBeenLastCalledWith(expect.stringContaining('Los datos de este asistente no se guardarán'));
-    await user.click(button('Mis grupos'));
-    await screen.findByRole('button', { name: /Familia.*Abrir grupo/ });
+    expect(window.confirm).toHaveBeenLastCalledWith(expect.stringContaining('Los datos sin guardar se perderán'));
+    await user.click(link('Grupos'));
+    await screen.findByRole('button', { name: 'Sorteos del grupo' });
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.every(([, init]) => init?.method === 'GET')).toBe(true);
 });
@@ -216,8 +218,8 @@ describe('eliminación de grupos', () => {
     }
 
     it('muestra los contadores y permite cancelar ambas confirmaciones con foco accesible', async () => {
-        const user = await open();
-        await user.click(button('Ajustes'));
+        const user = userEvent.setup(); await load();
+        await user.click(screen.getByText('Acciones del grupo'));
         let dialog = await start(user);
         expect(dialog).toHaveTextContent('Álbum & Fiesta');
         expect(dialog).toHaveTextContent('Personas registradas: 2');
@@ -238,8 +240,8 @@ describe('eliminación de grupos', () => {
     });
 
     it('valida el nombre, envía una sola petición y actualiza la lista y los selectores', async () => {
-        const user = await open();
-        await user.click(button('Ajustes'));
+        const user = userEvent.setup(); await load();
+        await user.click(screen.getByText('Acciones del grupo'));
         await start(user);
         await user.click(button('Continuar'));
         const input = screen.getByLabelText('Escribe el nombre exacto del grupo');
@@ -260,15 +262,15 @@ describe('eliminación de grupos', () => {
         complete(response({ groups: [{ id: 'h', name: 'Otro grupo' }] }));
         expect(await screen.findByText('Grupo eliminado definitivamente.')).toBeInTheDocument();
         expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-        expect(screen.queryByRole('button', { name: /Familia.*Abrir grupo/ })).not.toBeInTheDocument();
-        await user.click(button('Recordar sorteo'));
+        expect(screen.queryByRole('heading', { name: 'Familia' })).not.toBeInTheDocument();
+        await user.click(link('Sorteos')); await user.click(button('Nuevo sorteo'));
         expect(await screen.findByRole('option', { name: 'Otro grupo' })).toBeInTheDocument();
         expect(screen.queryByRole('option', { name: 'Familia' })).not.toBeInTheDocument();
     });
 
     it('mantiene el diálogo ante un error y vuelve al estado vacío tras eliminar el último grupo', async () => {
-        const user = await open();
-        await user.click(button('Ajustes'));
+        const user = userEvent.setup(); await load();
+        await user.click(screen.getByText('Acciones del grupo'));
         await start(user);
         await user.click(button('Continuar'));
         await user.type(screen.getByLabelText('Escribe el nombre exacto del grupo'), deletion.name);
@@ -282,8 +284,58 @@ describe('eliminación de grupos', () => {
         await user.type(screen.getByLabelText('Escribe el nombre exacto del grupo'), deletion.name);
         fetchMock.mockResolvedValueOnce(response({ groups: [] }));
         await user.click(button('Eliminar definitivamente'));
-        expect(await screen.findByText(/No hay grupos todavía/)).toBeInTheDocument();
-        expect(screen.getByLabelText('Nombre del grupo')).toBeVisible();
+        expect(await screen.findByText(/Crea tu primer grupo/)).toBeInTheDocument();
+        expect(button('Crear grupo')).toBeVisible();
         expect(fetchMock.mock.calls.every(([, init]) => init?.method !== 'POST')).toBe(true);
     });
+});
+
+it('opens the global edition list, restores the detail after remounting and handles browser history', async () => {
+    const user = userEvent.setup();
+    const first = render(<App />);
+    await screen.findByRole('button', { name: 'Sorteos del grupo' });
+    await user.click(link('Sorteos'));
+    await user.click(button('Abrir Navidad'));
+    await screen.findByRole('heading', { name: 'Navidad' });
+    expect(location.search).toBe('?view=draws&group=g&edition=e');
+    first.unmount();
+    render(<App />);
+    await screen.findByRole('heading', { name: 'Navidad' });
+    history.replaceState({ secretGiftIndex: 1 }, '', '?view=draws');
+    fireEvent(window, new PopStateEvent('popstate', { state: history.state }));
+    await screen.findByRole('heading', { name: 'Sorteos' });
+    history.replaceState({ secretGiftIndex: 2 }, '', '?view=draws&group=g&edition=e');
+    fireEvent(window, new PopStateEvent('popstate', { state: history.state }));
+    expect(await screen.findByRole('heading', { name: 'Navidad' })).toBeInTheDocument();
+});
+
+it.each(['?group=ausente', '?view=draws&group=g&edition=ausente'])('offers safe navigation from %s', async query => {
+    history.replaceState(null, '', query);
+    render(<App />);
+    await screen.findByRole('heading', { name: 'Este grupo o sorteo ya no está disponible' });
+    await userEvent.click(screen.getByRole('button', { name: /Volver a/ }));
+    expect(screen.queryByRole('heading', { name: 'Este grupo o sorteo ya no está disponible' })).not.toBeInTheDocument();
+});
+
+it('keeps focus in the form for consecutive adds and validates fields locally', async () => {
+    const user = await open();
+    await user.click(button('Participantes'));
+    await user.click(button('Añadir persona'));
+    const input = screen.getByLabelText('Nombre de persona');
+    expect(input).toHaveFocus();
+    await user.click(button('Guardar persona'));
+    expect(input).toHaveAccessibleDescription('Escribe el nombre de la persona.');
+    await user.type(input, 'Celia');
+    await user.type(screen.getByLabelText('Correo de persona'), 'celia@example.invalid');
+    await user.click(button('Guardar y añadir otra'));
+    await screen.findByRole('button', { name: 'Editar contacto de Celia' });
+    expect(input).toHaveValue('');
+    expect(input).toHaveFocus();
+});
+
+it('leaves the skip link first in the keyboard order', async () => {
+    const user = userEvent.setup();
+    await load();
+    await user.tab();
+    expect(link('Saltar al contenido')).toHaveFocus();
 });
